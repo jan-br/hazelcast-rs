@@ -58,13 +58,13 @@ impl Connection {
       let data = buffer[..n].to_vec();
 
       let mut message_reader = self.message_reader.lock().await;
-      println!("Received {} bytes", n);
       message_reader.append(data);
       let mut client_message = message_reader.read().await;
       while let Some(message) = &client_message {
         if message.start_frame.as_ref().unwrap().has_unfragmented_message_flag().await {
           let reader = self.read_callback.read().await;
           if let Some(callback) = &*reader {
+            dbg!(message.clone().get_total_length().await);
             callback(message.clone()).await;
           }
         } else {

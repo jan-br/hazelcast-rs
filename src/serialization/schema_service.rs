@@ -24,7 +24,7 @@ impl SchemaService {
     let invocation_service = self.get_invocation_service();
     let mut invocation = Invocation::new(invocation_service.clone(), ClientFetchSchemaCodec::encode_request(&schema_id).await);
     invocation.handler = Some(Box::pin(|mut client_message| Box::pin(async move {
-      Box::new(ClientFetchSchemaCodec::decode_response(&mut client_message).await)
+      Box::new(Box::new(ClientFetchSchemaCodec::decode_response(&mut client_message).await))
     })));
     let schema = invocation_service.invoke(&self.connection_registry, invocation).await;
     if let Some(schema) = schema {

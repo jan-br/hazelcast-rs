@@ -12,3 +12,4 @@ pub mod list_uuid_codec;
 pub mod error_codec;
 pub mod error_holder_codec;
 pub mod stack_trace_element_codec;
+pub mod data_codec;

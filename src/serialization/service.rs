@@ -73,6 +73,8 @@ pub struct SerializationServiceV1 {
 }
 
 impl SerializationServiceV1 {
+  pub const DATA_OFFSET: usize = 8;
+
   pub fn new(
     serialization_config: SerializationConfig,
     schema_service: Arc<SchemaService>,
@@ -162,7 +164,7 @@ impl SerializationServiceV1 {
     }
     self.serializer_name_to_id.insert(name, serializer.id());
     self.registry
-        .insert(serializer.id(), unsafe { transmute(serializer) });
+      .insert(serializer.id(), unsafe { transmute(serializer) });
   }
 
   pub fn create_identified_serializer(
@@ -170,11 +172,11 @@ impl SerializationServiceV1 {
   ) -> IdentifiedDataSerializableSerializer {
     let mut factories = HashMap::new();
     serialization_config
-        .data_serializable_factories
-        .iter()
-        .for_each(|(key, value)| {
-          factories.insert(key.clone(), value.clone());
-        });
+      .data_serializable_factories
+      .iter()
+      .for_each(|(key, value)| {
+        factories.insert(key.clone(), value.clone());
+      });
     factories.insert(PREDICATE_FACTORY_ID, Arc::new(predicate_factory));
     factories.insert(
       RELIABLE_TOPIC_MESSAGE_FACTORY_ID,
@@ -189,7 +191,7 @@ impl SerializationServiceV1 {
   pub fn read_object(&self, input: &mut ObjectDataInput) -> Box<dyn Any> {
     let serializer_id = input.read_int();
     let serializer: Box<dyn Serializer<Box<dyn Any>>> =
-        unsafe { std::mem::transmute(self.find_serializer_by_id(serializer_id)) };
+      unsafe { std::mem::transmute(self.find_serializer_by_id(serializer_id)) };
     serializer.read(input)
   }
 
@@ -217,6 +219,12 @@ impl SerializationServiceV1 {
     data_output.write_int_be(serializer.id());
     serializer.write(&mut data_output, object);
     HeapData::new(data_output.to_buffer())
+  }
+
+  pub async fn to_object<T: 'static>(self: &Arc<Self>, data: HeapData) -> Box<T> {
+    let serializer: Box<Arc<dyn Serializer<Box<T>>>> = unsafe { transmute(Box::new(self.find_serializer_by_id(data.get_type()))) };
+    let mut data_input = ObjectDataInput::new(data.to_buffer(), Self::DATA_OFFSET, self.clone(), self.serialization_config.is_big_endian);
+    serializer.read(&mut data_input)
   }
 
   pub fn write_object<T>(&self, out: &mut ObjectDataOutput, obj: &T) {

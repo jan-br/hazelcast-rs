@@ -2,7 +2,7 @@ use std::any::Any;
 use std::collections::HashMap;
 use std::fmt::Debug;
 use std::future::Future;
-use std::mem::transmute;
+use std::mem::{size_of, transmute};
 use std::ops::Deref;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -15,13 +15,14 @@ use crate::core::distributed_object::DistributedObject;
 use crate::invocation::{Invocation, InvocationReturnValue};
 use crate::network::connection::Connection;
 use crate::protocol::client_message::ClientMessage;
+use crate::proxy::map_proxy::AnySend;
 use crate::util::future::DeferredFuture;
 
 pub struct InvocationService {
   pub config: Arc<ClientConfig>,
   pub invocation_timeout: Duration,
   pub correllation_counter: RwLock<u64>,
-  pub invocations: RwLock<HashMap<u64, Arc<RwLock<Invocation<Box<dyn InvocationReturnValue>>>>>>,
+  pub invocations: RwLock<HashMap<u64, Arc<RwLock<Invocation<Box<Box<dyn AnySend>>>>>>>,
 }
 
 impl InvocationService {
@@ -34,12 +35,12 @@ impl InvocationService {
     }
   }
 
-  pub async fn invoke_urgent<R: InvocationReturnValue + Clone>(&self, connection_registry: &ConnectionRegistry, mut invocation: Invocation<Box<R>>) -> R {
+  pub async fn invoke_urgent<R: InvocationReturnValue + Clone>(&self, connection_registry: &ConnectionRegistry, mut invocation: Invocation<Box<Box<R>>>) -> R {
     invocation.urgent = true;
     self.invoke(connection_registry, invocation).await
   }
 
-  pub async fn invoke<R: InvocationReturnValue + Clone>(&self, connection_registry: &ConnectionRegistry, mut invocation: Invocation<Box<R>>) -> R {
+  pub async fn invoke<R: InvocationReturnValue + Clone>(&self, connection_registry: &ConnectionRegistry, mut invocation: Invocation<Box<Box<R>>>) -> R {
     invocation.deferred = Some(DeferredFuture::default());
     let mut correllation_counter = self.correllation_counter.write().await;
     *correllation_counter += 1;
@@ -47,21 +48,29 @@ impl InvocationService {
     let deferred = invocation.deferred.clone();
     let invocation = Arc::new(RwLock::new(invocation));
     self.do_invoke(connection_registry, invocation).await;
-    *deferred.unwrap().wait().await.unwrap()
+    **deferred.unwrap().wait().await.unwrap()
   }
 
-  pub async fn do_invoke<R: InvocationReturnValue + Clone>(&self, connection_registry: &ConnectionRegistry, invocation: Arc<RwLock<Invocation<Box<R>>>>) {
+  pub async fn do_invoke<R: InvocationReturnValue + Clone>(&self, connection_registry: &ConnectionRegistry, invocation: Arc<RwLock<Invocation<Box<Box<R>>>>>) {
     //todo: implement smart mode
     self.invoke_non_smart(connection_registry, invocation).await;
   }
 
-    pub async fn invoke_on_random_target<T: DistributedObject>(self: &Arc<Self>, connection_registry: &ConnectionRegistry, request: ClientMessage, handler: Pin<Box<dyn Send + Sync + Fn(ClientMessage) -> Pin<Box<dyn Send + Sync + Future<Output=Box<Arc<T>>>>>>>) -> Box<Arc<T>> {
-      let mut invocation = Invocation::<Box<Arc<T>>>::new(self.clone(), request);
+  pub async fn invoke_on_partition<R: InvocationReturnValue + Send + Sync + Clone>(self: &Arc<Self>, connection_registry: &ConnectionRegistry, request: ClientMessage, partition_id: i32, decoder: Pin<Box<dyn Send + Sync + Fn(ClientMessage) -> Pin<Box<dyn Send + Sync + Future<Output=Box<Box<R>>>>>>>) -> R {
+    let mut invocation = Invocation::<Box<Box<R>>>::new(self.clone(), request);
+    invocation.partition_id = partition_id;
+    invocation.handler = Some(decoder);
+
+    self.invoke(connection_registry, invocation).await
+  }
+
+  pub async fn invoke_on_random_target<T: DistributedObject>(self: &Arc<Self>, connection_registry: &ConnectionRegistry, request: ClientMessage, handler: Pin<Box<dyn Send + Sync + Fn(ClientMessage) -> Pin<Box<dyn Send + Sync + Future<Output=Box<Box<Arc<T>>>>>>>>) -> Box<Arc<T>> {
+    let mut invocation = Invocation::<Box<Box<Arc<T>>>>::new(self.clone(), request);
     invocation.handler = Some(handler);
     Box::new(self.invoke(connection_registry, invocation).await)
   }
 
-  pub async fn invoke_non_smart<R: InvocationReturnValue + Clone>(&self, connection_registry: &ConnectionRegistry, invocation: Arc<RwLock<Invocation<Box<R>>>>) {
+  pub async fn invoke_non_smart<R: InvocationReturnValue + Clone>(&self, connection_registry: &ConnectionRegistry, invocation: Arc<RwLock<Invocation<Box<Box<R>>>>>) {
     let connection = {
       let mut invocation = invocation.write().await;
       invocation.invoke_count += 1;
@@ -83,7 +92,7 @@ impl InvocationService {
     //todo: Error handling
   }
 
-  pub async fn invoke_on_random_connection<R: InvocationReturnValue + Clone>(&self, connection_registry: &ConnectionRegistry, invocation: Arc<RwLock<Invocation<Box<R>>>>) {
+  pub async fn invoke_on_random_connection<R: InvocationReturnValue + Clone>(&self, connection_registry: &ConnectionRegistry, invocation: Arc<RwLock<Invocation<Box<Box<R>>>>>) {
     let connection = connection_registry.get_random_connection().await;
     match connection {
       None => {
@@ -125,7 +134,7 @@ impl InvocationService {
     }
   }
 
-  pub async fn send<R: InvocationReturnValue + Clone>(&self, invocation: Arc<RwLock<Invocation<Box<R>>>>, connection: Connection) {
+  pub async fn send<R: InvocationReturnValue + Clone>(&self, invocation: Arc<RwLock<Invocation<Box<Box<R>>>>>, connection: Connection) {
     //todo check if connection is alive
     //todo implement backup_ack_to_client_enabled
     /*if self.backup_ack_to_client_enabled {
@@ -141,7 +150,7 @@ impl InvocationService {
     self.invocations.write().await.remove(&correlation_id);
   }
 
-  pub async fn register_invocation<R: InvocationReturnValue + Clone>(&self, invocation: Arc<RwLock<Invocation<Box<R>>>>) {
+  pub async fn register_invocation<R: InvocationReturnValue + Clone>(&self, invocation: Arc<RwLock<Invocation<Box<Box<R>>>>>) {
     let correlation_id = {
       let mut invocation = invocation.write().await;
       let partition_id = invocation.partition_id;
@@ -155,7 +164,9 @@ impl InvocationService {
       correlation_id
     };
     let mut invocations = self.invocations.write().await;
-    invocations.insert(correlation_id, unsafe { transmute(invocation) });
+
+
+    invocations.insert(correlation_id, unsafe { std::mem::transmute(invocation) });
   }
 
   pub async fn notify_error<R: InvocationReturnValue + Clone>(&self, invocation: &mut Invocation<Box<R>>, error: String) {

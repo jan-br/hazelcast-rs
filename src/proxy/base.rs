@@ -3,7 +3,9 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
+use crate::connection::registry::ConnectionRegistry;
 use crate::core::distributed_object::DistributedObject;
+use crate::invocation::InvocationReturnValue;
 use crate::invocation::service::InvocationService;
 use crate::partition_service::PartitionService;
 use crate::protocol::client_message::ClientMessage;
@@ -22,18 +24,21 @@ pub struct ProxyBase {
   pub partition_service: Arc<PartitionService>,
   pub invocation_service: Arc<InvocationService>,
   pub serialization_service: Arc<SerializationServiceV1>,
+  pub connection_registry: Arc<ConnectionRegistry>,
 }
 
 impl ProxyBase {
   pub fn new(
     name: String,
     service_name: String,
+    connection_registry: Arc<ConnectionRegistry>,
     partition_service: Arc<PartitionService>,
     invocation_service: Arc<InvocationService>,
     serialization_service: Arc<SerializationServiceV1>,
   ) -> Self {
     ProxyBase {
       name,
+      connection_registry,
       service_name,
       partition_service,
       invocation_service,
@@ -44,8 +49,14 @@ impl ProxyBase {
     self.serialization_service.to_data(object)
   }
 
-  pub fn encode_invoke_on_key<T: Serializable>(&self, key_data: HeapData, encoder: impl Fn(T) -> ClientMessage, decoder: impl Fn(ClientMessage) -> T) {
-    // let partition_id = self.partition_service.get_partition_id(par)
+  pub async fn encode_invoke_on_key<R: InvocationReturnValue + Send + Sync + Clone>(&self, key_data: HeapData, encoder: Pin<Box<dyn Send + Sync + Fn(String) -> Pin<Box<dyn Send + Sync + Future<Output=ClientMessage>>>>>, decoder: Pin<Box<dyn Send + Sync + Fn(ClientMessage) -> Pin<Box<dyn Send + Sync + Future<Output=Box<Box<R>>>>>>>) -> R {
+    let partition_id = self.partition_service.get_partition_id(key_data).await;
+    self.encode_invoke_on_partition(partition_id, encoder, decoder).await
+  }
+
+  async fn encode_invoke_on_partition<R: InvocationReturnValue + Send + Sync + Clone>(&self, partition_id: i32, encoder: Pin<Box<dyn Send + Sync + Fn(String) -> Pin<Box<dyn Send + Sync + Future<Output=ClientMessage>>>>>, decoder: Pin<Box<dyn Send + Sync + Fn(ClientMessage) -> Pin<Box<dyn Send + Sync + Future<Output=Box<Box<R>>>>>>>) -> R {
+    let client_message = encoder.call((self.name.clone(), )).await;
+    self.invocation_service.invoke_on_partition(&self.connection_registry, client_message, partition_id, decoder).await
   }
 }
 

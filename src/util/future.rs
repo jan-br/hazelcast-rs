@@ -8,14 +8,20 @@ use tokio::sync::oneshot::{Receiver, Sender};
 pub struct DeferredFuture<T, E: Debug + Clone> {
   sender: Arc<Mutex<Option<Sender<Result<T, E>>>>>,
   receiver: Arc<Mutex<Option<Receiver<Result<T, E>>>>>,
+  drop_blub: i32
 }
+
+
 
 impl<T, E> DeferredFuture<T, E> where E: Debug + Clone {
   pub async fn resolve(&mut self, value: T) {
     //todo: Error handling
     let mut sender = self.sender.lock().await;
     if let Some(sender) = sender.take() {
-      sender.send(Ok(value));
+      let result = sender.send(Ok(value));
+      result.map_err(|e| {
+
+      }).unwrap();
     } else {
       todo!()
     }
@@ -41,12 +47,14 @@ impl<T, E> DeferredFuture<T, E> where E: Debug + Clone {
   }
 }
 
+
 impl<T, E> Default for DeferredFuture<T, E> where E: Debug + Clone {
   fn default() -> Self {
     let (sender, receiver) = tokio::sync::oneshot::channel();
     Self {
       sender: Arc::new(Mutex::new(Some(sender))),
       receiver: Arc::new(Mutex::new(Some(receiver))),
+      drop_blub: 1337
     }
   }
 }

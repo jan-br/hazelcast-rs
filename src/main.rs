@@ -31,6 +31,8 @@ pub mod codec {
   pub mod client_add_cluster_view_listener_codec;
   pub mod client_fetch_schema_codec;
   pub mod client_create_proxy_codec;
+  pub mod map_get_codec;
+  pub mod map_put_codec;
 
   pub mod custom {
     pub mod address_codec;
@@ -46,13 +48,15 @@ pub mod codec {
 #[tokio::main]
 pub async fn main() {
   let client_config = Arc::new(ClientConfig::default()
-      .cluster_name("hello-world".to_string())
-      .network(|mut network| {
-        network.cluster_members.push(SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), 5701)));
-      })
-      .await);
+    .cluster_name("hello-world".to_string())
+    .network(|mut network| {
+      network.cluster_members.push(SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), 5701)));
+    })
+    .await);
   let mut client = HazelcastClient::new(client_config).await;
   client.start().await;
-  let distributed_map = client.get_map::<Option<String>, Option<String>>("my-distributed-map").await;
-  distributed_map.get(&Some("Sos".to_string()));
+
+  let test_map = client.get_map::<Option<String>, Option<String>>("test").await;
+  let option = test_map.get(&Some("key".to_string())).await;
+  dbg!(option);
 }

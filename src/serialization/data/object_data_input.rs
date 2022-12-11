@@ -14,6 +14,18 @@ pub struct ObjectDataInput {
   pub big_endian: bool,
 }
 
+impl ObjectDataInput {
+  pub fn new(buffer: Vec<u8>, offset: usize, serialization_service: Arc<SerializationServiceV1>, is_big_endian: bool) -> Self {
+    ObjectDataInput {
+      buffer,
+      offset,
+      service: serialization_service,
+      pos: offset,
+      big_endian: is_big_endian,
+    }
+  }
+}
+
 impl DataInput for ObjectDataInput {
   fn position(&self) -> usize {
     self.pos

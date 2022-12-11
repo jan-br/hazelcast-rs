@@ -47,7 +47,7 @@ impl DataOutput for ObjectDataOutput {
     old_pos
   }
   fn to_buffer(&self) -> Vec<u8> {
-    self.buffer.clone()
+    self.buffer[..self.pos].to_vec()
   }
 
   fn write(&mut self, bytes: &Vec<u8>) {
@@ -142,12 +142,12 @@ impl DataOutput for ObjectDataOutput {
   fn write_int(&mut self, number: i32) {
     self.ensure_available(BitsUtil::INT_SIZE_IN_BYTES as usize);
     BitsUtil::write_int32(&mut self.buffer, self.pos as usize, number, self.big_endian);
-    self.pos += BitsUtil::BYTE_SIZE_IN_BYTES as usize;
+    self.pos += BitsUtil::INT_SIZE_IN_BYTES as usize;
   }
   fn write_int_be(&mut self, number: i32) {
     self.ensure_available(BitsUtil::INT_SIZE_IN_BYTES as usize);
     BitsUtil::write_int32(&mut self.buffer, self.pos as usize, number, true);
-    self.pos += BitsUtil::BYTE_SIZE_IN_BYTES as usize;
+    self.pos += BitsUtil::INT_SIZE_IN_BYTES as usize;
   }
   fn write_int_array(&mut self, ints: Option<&Vec<i32>>) {
     self.write_array(|this, el| this.write_int(*el), ints);

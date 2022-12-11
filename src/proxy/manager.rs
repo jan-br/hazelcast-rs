@@ -79,13 +79,13 @@ impl ProxyManager {
                   let name = name.clone();
                   let service_name = service_name.clone();
                   async move {
-                    Box::new(Arc::new(this.initialize_local_proxy(name.clone(), service_name.clone(), create_at_server).await))
+                    Box::new(Box::new(Arc::new(this.initialize_local_proxy(name.clone(), service_name.clone(), create_at_server).await)))
                   }
                 })
               }
             }),
           )
-              .await
+          .await
         }
       }));
       T::register_proxy(full_name, maybe_future.clone()).await;
@@ -107,7 +107,7 @@ impl ProxyManager {
     //todo: add reliabletopic proxy
     //todo: add flake id generator proxy
 
-    T::create_proxy(ProxyBase::new(name, service_name, self.partition_service.clone(), self.invocation_service.clone(), self.serialization_service.clone())).await
+    T::create_proxy(ProxyBase::new(name, service_name, self.connection_registry.clone(), self.partition_service.clone(), self.invocation_service.clone(), self.serialization_service.clone())).await
   }
 
   async fn create_proxy<T: Proxy + Sized>(
@@ -118,7 +118,7 @@ impl ProxyManager {
       Box<
         dyn Send
         + Sync
-        + Fn(ClientMessage) -> Pin<Box<dyn Send + Sync + Future<Output=Box<Arc<T>>>>>,
+        + Fn(ClientMessage) -> Pin<Box<dyn Send + Sync + Future<Output=Box<Box<Arc<T>>>>>>,
       >,
     >,
   ) -> T {

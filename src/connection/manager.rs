@@ -296,7 +296,7 @@ impl ConnectionManager {
     let mut invocation = Invocation::new(self.invocation_service.clone(), request);
     invocation.connection = Some(connection.clone());
     invocation.handler = Some(Box::pin(|mut client_message| Box::pin(async move {
-      Box::new(ClientAuthenticationCodec::decode_response(&mut client_message).await)
+      Box::new(Box::new(ClientAuthenticationCodec::decode_response(&mut client_message).await))
     })));
     let response = timeout(
       self.heartbeat_manager

@@ -5,8 +5,12 @@ use std::marker::PhantomData;
 use std::mem::transmute;
 use std::pin::Pin;
 use std::sync::Arc;
+
 use lazy_static::lazy_static;
 use tokio::sync::RwLock;
+
+use crate::codec::map_get_codec::MapGetCodec;
+use crate::codec::map_put_codec::MapPutCodec;
 use crate::proxy::base::{HasProxyBase, ProxyBase};
 use crate::proxy::Proxy;
 use crate::serialization::heap_data::HeapData;
@@ -19,29 +23,71 @@ pub struct MapProxy<K: Serializable, V: Serializable> {
   phantom: PhantomData<(K, V)>,
 }
 
-impl<K: Serializable + Clone + 'static, V: Serializable + 'static> MapProxy<K, V> {
-  pub fn new(base: ProxyBase) -> Self {
+
+impl<K: Serializable + Send + Sync + Clone + 'static, V: Serializable + 'static + Clone + Send + Sync> MapProxy<K, V> {
+  pub fn new(
+    base: ProxyBase,
+  ) -> Self {
     MapProxy {
       base,
       phantom: PhantomData::default(),
     }
   }
 
-  pub fn get(&self, key: &K) {
-    let key_data = self.base.to_data(Box::new(key.clone()));
-    // self.get_internal(key_data);
+  pub async fn put(&self, key: K, value: V) {
+    let key_data = self.base.to_data(Box::new(key));
+    let value_data = self.base.to_data(Box::new(value));
+    self.put_internal(key_data, value_data).await;
   }
 
-  // fn get_internal(&self: &Arc<Self>, key_data: HeapData) {
-  //   self.base.encode_invoke_on_key(key_data, |value| {
-  //     todo!()
-  //   }, |response| {
-  //     todo!()
-  //   });
-  // }
+
+  async fn put_internal(&self, key_data: HeapData, value_data: HeapData) {
+    self.base.encode_invoke_on_key(
+      key_data.clone(),
+      Box::pin({
+        move |name| Box::pin({
+          let key_data = key_data.clone();
+          let value_data = value_data.clone();
+          async move {
+            MapPutCodec::encode_request(&name, &key_data, &value_data, &0, &0).await
+          }
+        })
+      }),
+      Box::pin(|mut response| Box::pin(async move { Box::new(Box::new(MapGetCodec::decode_response(&mut response).await)) })),
+    ).await;
+  }
+
+  pub async fn get(&self, key: &K) -> Option<V> {
+    let key_data = self.base.to_data(Box::new(key.clone()));
+    self.get_internal(key_data).await.map(|data| *data)
+  }
+  async fn get_internal(&self, key_data: HeapData) -> Option<Box<V>> {
+    self.base.encode_invoke_on_key(key_data.clone(), {
+      Box::pin(move |value| {
+        let key_data = key_data.clone();
+
+        Box::pin(async move {
+          MapGetCodec::encode_request(&value, &key_data, &0).await
+        })
+      })
+    }, Box::pin({
+      let serialization_service = self.get_proxy_base().serialization_service.clone();
+      move |mut response| {
+        let serialization_service = serialization_service.clone();
+        Box::pin(async move {
+          let serialization_service = serialization_service.clone();
+          if let Some(data) = MapGetCodec::decode_response(&mut response).await {
+            Box::new(Box::new(Some(serialization_service.to_object::<V>(data).await)))
+          } else {
+            Box::new(Box::new(None))
+          }
+        })
+      }
+    })).await
+  }
 }
 
-trait AnySend: Any + Send + Sync {}
+pub trait AnySend: Any + Send + Sync {}
 
 impl<K: Clone + Send + Sync + Serializable + 'static, V: Clone + Send + Sync + Serializable + 'static> Proxy for MapProxy<K, V> {
   const SERVICE_NAME: &'static str = "hz:impl:mapService";
