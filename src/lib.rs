@@ -49,24 +49,3 @@ pub mod codec {
     pub mod field_descriptor_codec;
   }
 }
-
-#[tokio::main]
-pub async fn main() {
-  let client_config = Arc::new(ClientConfig::default()
-    .cluster_name("hello-world".to_string())
-    .network(|mut network| {
-      network.cluster_members.push(SocketAddr::V4(SocketAddrV4::new(Ipv4Addr::new(127, 0, 0, 1), 5701)));
-    })
-    .await);
-  let mut client = HazelcastClient::new(client_config).await;
-  client.start().await;
-
-  let test_map = client.get_map::<Option<String>, Option<String>>("test").await;
-  let option = test_map.get(&Some("key".to_string())).await;
-  test_map.add_entry_listener::<{EventType::ALL}>(|event| Box::pin(async move {
-    println!("Event {}", event.key.unwrap().unwrap() );
-  })).await;
-  test_map.put(Some("key".to_string()), Some("value".to_string())).await;
-  dbg!(option);
-  tokio::time::sleep(Duration::from_secs(1000)).await;
-}
