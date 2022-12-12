@@ -6,6 +6,7 @@ use crate::connection::manager::ConnectionManager;
 use crate::connection::registry::ConnectionRegistry;
 use crate::invocation::service::InvocationService;
 use crate::lifecycle_service::LifecycleService;
+use crate::listener::service::ListenerService;
 use crate::partition_service::PartitionService;
 use crate::proxy::manager::ProxyManager;
 use crate::proxy::map_proxy::MapProxy;
@@ -14,7 +15,7 @@ use crate::serialization::serializable::Serializable;
 use crate::serialization::service::SerializationServiceV1;
 
 pub struct HazelcastClient {
-  connection_manager: ConnectionManager,
+  connection_manager: Arc<ConnectionManager>,
   active: bool,
   cluster_failover_service: Arc<ClusterFailoverService>,
   cluster_service: Arc<ClusterService>,
@@ -38,25 +39,28 @@ impl HazelcastClient {
       network.smart_routing,
       cluster_service.clone(),
     ));
-
     let invocation_service = Arc::new(InvocationService::new(config.clone()));
     let schema_service = Arc::new(SchemaService::new(connection_registry.clone()));
     let serialization_service = Arc::new(SerializationServiceV1::new(config.serialization.read().await.clone(), schema_service.clone()));
     let partition_service = Arc::new(PartitionService::new(serialization_service.clone()));
     let lifecycle_service = Arc::new(LifecycleService::new());
-    let proxy_manager = Arc::new(ProxyManager::new(partition_service.clone(), connection_registry.clone(), invocation_service.clone(), serialization_service.clone()));
+
+    let connection_manager = Arc::new(ConnectionManager::new(
+      config.clone(),
+      cluster_failover_service.clone(),
+      cluster_service.clone(),
+      connection_registry.clone(),
+      invocation_service.clone(),
+      partition_service.clone(),
+      lifecycle_service.clone(),
+    ).await);
+
+    let listener_service = Arc::new(ListenerService::new(invocation_service.clone(), connection_manager.clone()));
+    let proxy_manager = Arc::new(ProxyManager::new(partition_service.clone(), connection_registry.clone(), invocation_service.clone(), serialization_service.clone(), listener_service.clone(), cluster_service.clone()));
 
     HazelcastClient {
       proxy_manager,
-      connection_manager: ConnectionManager::new(
-        config.clone(),
-        cluster_failover_service.clone(),
-        cluster_service.clone(),
-        connection_registry.clone(),
-        invocation_service,
-        partition_service.clone(),
-        lifecycle_service,
-      ).await,
+      connection_manager,
       active: false,
       cluster_service: cluster_service.clone(),
       cluster_failover_service,

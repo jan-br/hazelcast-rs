@@ -27,11 +27,12 @@ pub struct Connection {
   pub read_callback: Arc<RwLock<Option<Pin<Box<dyn Fn(ClientMessage) -> Pin<Box<dyn Future<Output=()> + Send + Sync>> + Send + Sync>>>>>,
   pub fragmented_message_handler: Arc<Mutex<FragmentedClientMessageHandler>>,
   pub connected_server_version: Arc<Mutex<Option<i32>>>,
+  pub connection_id: i32,
   message_reader: Arc<Mutex<ClientMessageReader>>,
 }
 
 impl Connection {
-  pub fn new(remote_address: Arc<Address>, write_half: OwnedWriteHalf, read_half: OwnedReadHalf) -> Self {
+  pub fn new(remote_address: Arc<Address>, write_half: OwnedWriteHalf, read_half: OwnedReadHalf, connection_id: i32) -> Self {
     Connection {
       closed_time: Arc::new(Mutex::new(None)),
       closed_cause: Arc::new(Mutex::new(None)),
@@ -44,6 +45,7 @@ impl Connection {
       fragmented_message_handler: Arc::new(Mutex::new(FragmentedClientMessageHandler::new())),
       connected_server_version: Arc::new(Mutex::new(None)),
       closed_reason: Arc::new(Mutex::new(None)),
+      connection_id
     }
   }
 

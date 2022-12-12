@@ -30,8 +30,8 @@ impl MapAddEntryListenerToKeyCodec {
     const REQUEST_INITIAL_FRAME_SIZE: usize = Self::REQUEST_LOCAL_ONLY_OFFSET + BitsUtil::BOOLEAN_SIZE_IN_BYTES as usize;
     const RESPONSE_RESPONSE_OFFSET: usize = ClientMessage::RESPONSE_BACKUP_ACKS_OFFSET as usize + BitsUtil::BYTE_SIZE_IN_BYTES as usize;
     const EVENT_ENTRY_EVENT_TYPE_OFFSET: usize = ClientMessage::PARTITION_ID_OFFSET as usize + BitsUtil::INT_SIZE_IN_BYTES as usize;
-    const EVENT_ENTRY_UUID_OFFSET: usize = EVENT_ENTRY_EVENT_TYPE_OFFSET as usize+ BitsUtil::INT_SIZE_IN_BYTES as usize;
-    const EVENT_ENTRY_NUMBER_OF_AFFECTED_ENTRIES_OFFSET: usize = EVENT_ENTRY_UUID_OFFSET as usize+ BitsUtil::UUID_SIZE_IN_BYTES as usize;
+    const EVENT_ENTRY_UUID_OFFSET: usize = Self::EVENT_ENTRY_EVENT_TYPE_OFFSET as usize+ BitsUtil::INT_SIZE_IN_BYTES as usize;
+    const EVENT_ENTRY_NUMBER_OF_AFFECTED_ENTRIES_OFFSET: usize = Self::EVENT_ENTRY_UUID_OFFSET as usize+ BitsUtil::UUID_SIZE_IN_BYTES as usize;
 
     pub fn encode_request<'a>(name: &'a String, key: &'a HeapData, include_value: &'a bool, listener_flags: &'a i32, local_only: &'a bool) -> Pin<Box<dyn Future<Output=ClientMessage> + Send + Sync + 'a>> {
         Box::pin(async move {
@@ -58,12 +58,12 @@ impl MapAddEntryListenerToKeyCodec {
         Box::pin(async move {
             let initial_frame = client_message.next_frame().await.unwrap();
 
-            FixSizedTypesCodec::decode_uuid(&*initial_frame.content.lock().await, Self::RESPONSE_RESPONSE_OFFSET).await
+            let x = FixSizedTypesCodec::decode_uuid(&*initial_frame.content.lock().await, Self::RESPONSE_RESPONSE_OFFSET).await; x
         })
     }
 
 
-    pub async fn handle(client_message: &mut ClientMessage, handle_entry_event: Option<impl Fn(HeapData, HeapData, HeapData, HeapData, i32, Uuid, i32)>) {
+    pub async fn handle(client_message: &mut ClientMessage, handle_entry_event: Option<Pin<Box<dyn Fn(Option<HeapData>, Option<HeapData>, Option<HeapData>, Option<HeapData>, i32, Uuid, i32) -> Pin<Box<dyn Future<Output=()> + Send + Sync>> + Send + Sync>>>) {
         let message_type = client_message.get_message_type().await;
         if message_type == Self::EVENT_ENTRY_MESSAGE_TYPE && handle_entry_event.is_some() {
             let initial_frame = client_message.next_frame().await.unwrap();
@@ -74,7 +74,7 @@ impl MapAddEntryListenerToKeyCodec {
             let value = CodecUtil::decode_nullable(client_message, DataCodec::decode).await;
             let old_value = CodecUtil::decode_nullable(client_message, DataCodec::decode).await;
             let merging_value = CodecUtil::decode_nullable(client_message, DataCodec::decode).await;
-            handle_entry_event.unwrap()(key, value, old_value, merging_value, event_type, uuid, number_of_affected_entries);
+            handle_entry_event.unwrap()(key, value, old_value, merging_value, event_type, uuid, number_of_affected_entries).await;
             return;
         }
     }

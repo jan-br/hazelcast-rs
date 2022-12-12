@@ -17,6 +17,8 @@ use std::pin::Pin;
 use std::string::ToString;
 use std::sync::Arc;
 use tokio::sync::{Mutex, RwLock};
+use crate::cluster::service::ClusterService;
+use crate::listener::service::ListenerService;
 use crate::partition_service::PartitionService;
 use crate::serialization::service::SerializationServiceV1;
 
@@ -26,6 +28,8 @@ pub struct ProxyManager {
   pub invocation_service: Arc<InvocationService>,
   pub connection_registry: Arc<ConnectionRegistry>,
   pub serialization_service: Arc<SerializationServiceV1>,
+  pub listener_service: Arc<ListenerService>,
+  pub cluster_service: Arc<ClusterService>,
 }
 
 impl ProxyManager {
@@ -36,12 +40,16 @@ impl ProxyManager {
     connection_registry: Arc<ConnectionRegistry>,
     invocation_service: Arc<InvocationService>,
     serialization_service: Arc<SerializationServiceV1>,
+    listener_service: Arc<ListenerService>,
+    cluster_service: Arc<ClusterService>,
   ) -> Self {
     ProxyManager {
       partition_service,
       connection_registry,
       invocation_service,
       serialization_service,
+      listener_service,
+      cluster_service,
     }
   }
 
@@ -85,7 +93,7 @@ impl ProxyManager {
               }
             }),
           )
-          .await
+            .await
         }
       }));
       T::register_proxy(full_name, maybe_future.clone()).await;
@@ -107,7 +115,16 @@ impl ProxyManager {
     //todo: add reliabletopic proxy
     //todo: add flake id generator proxy
 
-    T::create_proxy(ProxyBase::new(name, service_name, self.connection_registry.clone(), self.partition_service.clone(), self.invocation_service.clone(), self.serialization_service.clone())).await
+    T::create_proxy(ProxyBase::new(
+      name,
+      service_name,
+      self.connection_registry.clone(),
+      self.partition_service.clone(),
+      self.invocation_service.clone(),
+      self.serialization_service.clone(),
+      self.listener_service.clone(),
+      self.cluster_service.clone(),
+    )).await
   }
 
   async fn create_proxy<T: Proxy + Sized>(
@@ -124,11 +141,11 @@ impl ProxyManager {
   ) -> T {
     let request = ClientCreateProxyCodec::encode_request(&name, &service_name).await;
     self
-        .invocation_service
-        .invoke_on_random_target(&*self.connection_registry.clone(), request, handler)
-        .await
-        .deref()
-        .deref()
-        .clone()
+      .invocation_service
+      .invoke_on_random_target(&*self.connection_registry.clone(), request, handler)
+      .await
+      .deref()
+      .deref()
+      .clone()
   }
 }

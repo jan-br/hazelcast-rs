@@ -24,8 +24,8 @@ impl ClientAddPartitionLostListenerCodec {
     const REQUEST_INITIAL_FRAME_SIZE: usize = Self::REQUEST_LOCAL_ONLY_OFFSET + BitsUtil::BOOLEAN_SIZE_IN_BYTES as usize;
     const RESPONSE_RESPONSE_OFFSET: usize = ClientMessage::RESPONSE_BACKUP_ACKS_OFFSET as usize + BitsUtil::BYTE_SIZE_IN_BYTES as usize;
     const EVENT_PARTITION_LOST_PARTITION_ID_OFFSET: usize = ClientMessage::PARTITION_ID_OFFSET as usize + BitsUtil::INT_SIZE_IN_BYTES as usize;
-    const EVENT_PARTITION_LOST_LOST_BACKUP_COUNT_OFFSET: usize = EVENT_PARTITION_LOST_PARTITION_ID_OFFSET as usize+ BitsUtil::INT_SIZE_IN_BYTES as usize;
-    const EVENT_PARTITION_LOST_SOURCE_OFFSET: usize = EVENT_PARTITION_LOST_LOST_BACKUP_COUNT_OFFSET as usize+ BitsUtil::INT_SIZE_IN_BYTES as usize;
+    const EVENT_PARTITION_LOST_LOST_BACKUP_COUNT_OFFSET: usize = Self::EVENT_PARTITION_LOST_PARTITION_ID_OFFSET as usize+ BitsUtil::INT_SIZE_IN_BYTES as usize;
+    const EVENT_PARTITION_LOST_SOURCE_OFFSET: usize = Self::EVENT_PARTITION_LOST_LOST_BACKUP_COUNT_OFFSET as usize+ BitsUtil::INT_SIZE_IN_BYTES as usize;
 
     pub fn encode_request<'a>(local_only: &'a bool) -> Pin<Box<dyn Future<Output=ClientMessage> + Send + Sync + 'a>> {
         Box::pin(async move {
@@ -48,19 +48,19 @@ impl ClientAddPartitionLostListenerCodec {
         Box::pin(async move {
             let initial_frame = client_message.next_frame().await.unwrap();
 
-            FixSizedTypesCodec::decode_uuid(&*initial_frame.content.lock().await, Self::RESPONSE_RESPONSE_OFFSET).await
+            let x = FixSizedTypesCodec::decode_uuid(&*initial_frame.content.lock().await, Self::RESPONSE_RESPONSE_OFFSET).await; x
         })
     }
 
 
-    pub async fn handle(client_message: &mut ClientMessage, handle_partition_lost_event: Option<impl Fn(i32, i32, Uuid)>) {
+    pub async fn handle(client_message: &mut ClientMessage, handle_partition_lost_event: Option<Pin<Box<dyn Fn(i32, i32, Option<Uuid>) -> Pin<Box<dyn Future<Output=()> + Send + Sync>> + Send + Sync>>>) {
         let message_type = client_message.get_message_type().await;
         if message_type == Self::EVENT_PARTITION_LOST_MESSAGE_TYPE && handle_partition_lost_event.is_some() {
             let initial_frame = client_message.next_frame().await.unwrap();
             let partition_id = FixSizedTypesCodec::decode_int(&mut *initial_frame.content.lock().await, Self::EVENT_PARTITION_LOST_PARTITION_ID_OFFSET).await;
             let lost_backup_count = FixSizedTypesCodec::decode_int(&mut *initial_frame.content.lock().await, Self::EVENT_PARTITION_LOST_LOST_BACKUP_COUNT_OFFSET).await;
             let source = FixSizedTypesCodec::decode_uuid(&mut *initial_frame.content.lock().await, Self::EVENT_PARTITION_LOST_SOURCE_OFFSET).await;
-            handle_partition_lost_event.unwrap()(partition_id, lost_backup_count, source);
+            handle_partition_lost_event.unwrap()(partition_id, lost_backup_count, source).await;
             return;
         }
     }

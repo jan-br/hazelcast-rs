@@ -10,6 +10,8 @@ use crate::util::future::DeferredFuture;
 
 pub mod service;
 pub mod murmur;
+pub mod listener_registration;
+pub mod connection_registration;
 
 pub trait InvocationReturnValue: Send + Sync {}
 
@@ -31,6 +33,7 @@ pub struct Invocation<R: InvocationReturnValue + Send + Sync> {
   pub urgent: bool,
   pub deferred: Option<DeferredFuture<R, String>>,
   pub handler: Option<Pin<Box<dyn Send + Sync + Fn(ClientMessage) -> Pin<Box<dyn Send + Sync + Future<Output=R>>>>>>,
+  pub event_handler: Option<Arc<Pin<Box<dyn Send + Sync + Fn(ClientMessage) -> Pin<Box<dyn Send + Sync + Future<Output=()>>>>>>>,
 }
 
 impl<R: InvocationReturnValue + Send + Sync> Invocation<R> {
@@ -51,6 +54,7 @@ impl<R: InvocationReturnValue + Send + Sync> Invocation<R> {
       urgent: false,
       deferred: None,
       handler: None,
+      event_handler: None,
     }
   }
 
@@ -71,6 +75,7 @@ impl<R: InvocationReturnValue + Send + Sync> Invocation<R> {
       urgent: false,
       deferred: None,
       handler: None,
+      event_handler: None
     }
   }
 

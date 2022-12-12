@@ -8,10 +8,16 @@ use std::sync::Arc;
 
 use lazy_static::lazy_static;
 use tokio::sync::RwLock;
+use uuid::Uuid;
+use crate::codec::map_add_entry_listener_codec::MapAddEntryListenerCodec;
 
 use crate::codec::map_get_codec::MapGetCodec;
 use crate::codec::map_put_codec::MapPutCodec;
+use crate::codec::map_remove_entry_listener_codec::MapRemoveEntryListenerCodec;
+use crate::listener::message_codec::ListenerMessageCodec;
+use crate::protocol::client_message::ClientMessage;
 use crate::proxy::base::{HasProxyBase, ProxyBase};
+use crate::proxy::entry_event::EntryEvent;
 use crate::proxy::Proxy;
 use crate::serialization::heap_data::HeapData;
 use crate::serialization::serializable::Serializable;
@@ -23,6 +29,37 @@ pub struct MapProxy<K: Serializable, V: Serializable> {
   phantom: PhantomData<(K, V)>,
 }
 
+pub trait MapListener<K, V, const FLAGS: i32> = Fn(EntryEvent<K, V>) -> Pin<Box<dyn Send + Sync + Future<Output=()>>> + Send + Sync + 'static;
+
+struct EntryListenerCodec {
+  name: String,
+  include_value: bool,
+  flags: i32,
+}
+
+impl EntryListenerCodec {
+  pub fn new(name: String, include_value: bool, flags: i32) -> Self {
+    Self {
+      name,
+      include_value,
+      flags,
+    }
+  }
+}
+
+impl ListenerMessageCodec for EntryListenerCodec {
+  fn encode_add_request<'a>(&'a self, local_only: &'a bool) -> Pin<Box<dyn Future<Output=ClientMessage> + Send + Sync + 'a>> {
+    MapAddEntryListenerCodec::encode_request(&self.name, &self.include_value, &self.flags, local_only)
+  }
+
+  fn decode_add_response<'a>(&'a self, client_message: &'a mut ClientMessage) -> Pin<Box<dyn Future<Output=Uuid> + Send + Sync + 'a>> {
+    MapAddEntryListenerCodec::decode_response(client_message)
+  }
+
+  fn encode_remove_request<'a>(&'a self, registration_id: &'a Uuid) -> Pin<Box<dyn Future<Output=ClientMessage> + Send + Sync + 'a>> {
+    MapRemoveEntryListenerCodec::encode_request(&self.name, registration_id)
+  }
+}
 
 impl<K: Serializable + Send + Sync + Clone + 'static, V: Serializable + 'static + Clone + Send + Sync> MapProxy<K, V> {
   pub fn new(
@@ -33,6 +70,54 @@ impl<K: Serializable + Send + Sync + Clone + 'static, V: Serializable + 'static 
       phantom: PhantomData::default(),
     }
   }
+
+  pub async fn add_entry_listener<const FLAGS: i32>(&self, listener: impl MapListener<K, V, FLAGS>) {
+    let listener = Arc::new(listener);
+    let cluster_service = self.base.cluster_service.clone();
+    let base = self.base.clone();
+    self.base.listener_service.register_listener(EntryListenerCodec::new(self.base.name.clone(), true, FLAGS), {
+      move |mut client_message| {
+        let listener = listener.clone();
+        let cluster_service = cluster_service.clone();
+        let base = base.clone();
+        Box::pin(async move {
+          MapAddEntryListenerCodec::handle(&mut client_message, Some(Box::pin({
+            move |key, value, old_value, merging_value, event_type, uuid, number_of_affeced_entries| {
+              let listener = listener.clone();
+              let base = base.clone();
+              let cluster_service = cluster_service.clone();
+              Box::pin(async move {
+                listener.call((EntryEvent::new(
+                  base.name.clone(),
+                  if let Some(key) = key { Some(*base.serialization_service.to_object(key).await) } else { None },
+                  if let Some(value) = value { Some(*base.serialization_service.to_object(value).await) } else { None },
+                  if let Some(old_value) = old_value { Some(*base.serialization_service.to_object(old_value).await) } else { None },
+                  if let Some(merging_value) = merging_value { Some(*base.serialization_service.to_object(merging_value).await) } else { None },
+                  cluster_service.get_member(uuid).await,
+                ), )).await;
+              })
+            }
+          }))).await;
+        })
+      }
+    }).await;
+
+    // self.base.listener_service.register_listener(EntryListenerCodec::new(self.base.name.clone(), true, FLAGS), {
+    //   let name = self.base.name.clone();
+    //   let listener = listener.clone();
+    //   let cluster_service = self.base.cluster_service.clone();
+    //   move |mut client_message| {
+    //     let listener = listener.clone();
+    //     let cluster_service = self.base.cluster_service.clone();
+    //     // Box::pin(listener.call((client_message, )))
+    //     Box::pin(async move {
+    //       // MapAddEntryListenerCodec::handle(&mut client_message, Some(Box::pin(|_, _, _, _, _, _, _| Box::pin(async move { todo!() })))).await;
+    //       todo!()
+    //     })
+    //   }
+    // }).await;
+  }
+
 
   pub async fn put(&self, key: K, value: V) {
     let key_data = self.base.to_data(Box::new(key));

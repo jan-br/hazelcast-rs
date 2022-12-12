@@ -1,3 +1,5 @@
+use std::future::Future;
+use std::pin::Pin;
 use chrono::{DateTime, FixedOffset, NaiveDate, NaiveDateTime, NaiveTime};
 use uuid::Uuid;
 use crate::util::bits_util::BitsUtil;
@@ -19,51 +21,51 @@ impl FixSizedTypesCodec {
   }
 
   pub async fn decode_local_date(buffer: &Vec<u8>, offset: usize) -> NaiveDate {
-      let year = Self::decode_int(buffer, offset).await;
-      let month = Self::decode_byte(buffer, offset + BitsUtil::INT_SIZE_IN_BYTES as usize).await;
-      let date = Self::decode_byte(buffer, offset + BitsUtil::INT_SIZE_IN_BYTES as usize + BitsUtil::BYTE_SIZE_IN_BYTES as usize).await;
+    let year = Self::decode_int(buffer, offset).await;
+    let month = Self::decode_byte(buffer, offset + BitsUtil::INT_SIZE_IN_BYTES as usize).await;
+    let date = Self::decode_byte(buffer, offset + BitsUtil::INT_SIZE_IN_BYTES as usize + BitsUtil::BYTE_SIZE_IN_BYTES as usize).await;
     NaiveDate::from_ymd(year, month as u32, date as u32)
   }
 
   pub async fn decode_local_date_time(buffer: &Vec<u8>, offset: usize) -> NaiveDateTime {
-      let date = Self::decode_local_date(buffer, offset).await;
-      let time = Self::decode_local_time(buffer, offset + BitsUtil::LOCAL_DATE_SIZE_IN_BYTES as usize).await;
+    let date = Self::decode_local_date(buffer, offset).await;
+    let time = Self::decode_local_time(buffer, offset + BitsUtil::LOCAL_DATE_SIZE_IN_BYTES as usize).await;
     NaiveDateTime::new(date, time)
   }
 
   pub async fn decode_offset_date_time(buffer: &Vec<u8>, offset: usize) -> DateTime<FixedOffset> {
-  let local_date_time = Self::decode_local_date_time(buffer, offset).await;
-  let offset_seconds = Self::decode_int(buffer, offset + BitsUtil::LOCAL_DATETIME_SIZE_IN_BYTES as usize).await;
+    let local_date_time = Self::decode_local_date_time(buffer, offset).await;
+    let offset_seconds = Self::decode_int(buffer, offset + BitsUtil::LOCAL_DATETIME_SIZE_IN_BYTES as usize).await;
     //todo: check if this is correct
     DateTime::from_utc(local_date_time, FixedOffset::east(offset_seconds))
   }
 
   pub async fn decode_local_time(buffer: &Vec<u8>, offset: usize) -> NaiveTime {
-      let hour = Self::decode_byte(buffer, offset).await;
-      let minute = Self::decode_byte(buffer, offset + BitsUtil::BYTE_SIZE_IN_BYTES as usize).await;
-      let second = Self::decode_byte(buffer, offset + BitsUtil::BYTE_SIZE_IN_BYTES as usize * 2).await;
-      let nano = Self::decode_int(buffer, offset + BitsUtil::BYTE_SIZE_IN_BYTES as usize * 3).await;
+    let hour = Self::decode_byte(buffer, offset).await;
+    let minute = Self::decode_byte(buffer, offset + BitsUtil::BYTE_SIZE_IN_BYTES as usize).await;
+    let second = Self::decode_byte(buffer, offset + BitsUtil::BYTE_SIZE_IN_BYTES as usize * 2).await;
+    let nano = Self::decode_int(buffer, offset + BitsUtil::BYTE_SIZE_IN_BYTES as usize * 3).await;
     NaiveTime::from_hms_nano(hour as u32, minute as u32, second as u32, nano as u32)
   }
 
   pub async fn decode_short(buffer: &Vec<u8>, offset: usize) -> i16 {
-      BitsUtil::read_int16(buffer, offset, false)
+    BitsUtil::read_int16(buffer, offset, false)
   }
 
   pub async fn decode_float(buffer: &Vec<u8>, offset: usize) -> f32 {
-      BitsUtil::read_float32(buffer, offset, false)
+    BitsUtil::read_float32(buffer, offset, false)
   }
 
   pub async fn decode_double(buffer: &mut Vec<u8>, offset: usize) -> f64 {
-      BitsUtil::read_float64(buffer, offset, false)
+    BitsUtil::read_float64(buffer, offset, false)
   }
 
   pub async fn encode_long(buffer: &mut Vec<u8>, offset: usize, value: &i64) {
-      BitsUtil::write_int64(buffer, offset, *value, false);
+    BitsUtil::write_int64(buffer, offset, *value, false);
   }
 
   pub async fn decode_long(buffer: &Vec<u8>, offset: usize) -> i64 {
-      BitsUtil::read_int64(buffer, offset, false)
+    BitsUtil::read_int64(buffer, offset, false)
   }
 
   pub async fn encode_non_negative_number_as_long(buffer: &mut Vec<u8>, offset: usize, value: u64) {
@@ -73,7 +75,7 @@ impl FixSizedTypesCodec {
 
     if (value + 1) as u128 >= TWO_PWR_63_DBL {
       //todo: check if this is correct
-        BitsUtil::write_int32(buffer, offset, -1_i32, false);
+      BitsUtil::write_int32(buffer, offset, -1_i32, false);
       BitsUtil::write_int32(buffer, offset + BitsUtil::INT_SIZE_IN_BYTES as usize, 0x7FFFFFFF, false);
       return;
     }
@@ -120,17 +122,19 @@ impl FixSizedTypesCodec {
     Self::encode_long(buffer, offset + BitsUtil::BOOLEAN_SIZE_IN_BYTES as usize + BitsUtil::LONG_SIZE_IN_BYTES as usize, &(least_significant_bits as i64)).await;
   }
 
-  pub async fn decode_uuid(buffer: &Vec<u8>, offset: usize) -> Uuid {
+  pub fn decode_uuid<'a>(buffer: &'a Vec<u8>, offset: usize) -> Pin<Box<dyn Future<Output=Uuid> + Send + Sync + 'a>> {
+    Box::pin(async move {
       Self::decode_uuid_nullable(buffer, offset).await.unwrap()
+    })
   }
 
   pub async fn decode_uuid_nullable(buffer: &Vec<u8>, offset: usize) -> Option<Uuid> {
-      let is_null = Self::decode_boolean(buffer, offset).await;
+    let is_null = Self::decode_boolean(buffer, offset).await;
     if is_null {
       return None;
     }
 
-      let most_significant_bits = Self::decode_long(buffer, offset + BitsUtil::BOOLEAN_SIZE_IN_BYTES as usize).await;
+    let most_significant_bits = Self::decode_long(buffer, offset + BitsUtil::BOOLEAN_SIZE_IN_BYTES as usize).await;
     let least_significant_bits = Self::decode_long(buffer, offset + BitsUtil::BOOLEAN_SIZE_IN_BYTES as usize + BitsUtil::LONG_SIZE_IN_BYTES as usize).await;
     Some(Uuid::from_u64_pair(most_significant_bits as u64, least_significant_bits as u64))
   }

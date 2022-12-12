@@ -47,12 +47,12 @@ impl ClientAddDistributedObjectListenerCodec {
         Box::pin(async move {
             let initial_frame = client_message.next_frame().await.unwrap();
 
-            FixSizedTypesCodec::decode_uuid(&*initial_frame.content.lock().await, Self::RESPONSE_RESPONSE_OFFSET).await
+            let x = FixSizedTypesCodec::decode_uuid(&*initial_frame.content.lock().await, Self::RESPONSE_RESPONSE_OFFSET).await; x
         })
     }
 
 
-    pub async fn handle(client_message: &mut ClientMessage, handle_distributed_object_event: Option<impl Fn(String, String, String, Uuid)>) {
+    pub async fn handle(client_message: &mut ClientMessage, handle_distributed_object_event: Option<Pin<Box<dyn Fn(String, String, String, Uuid) -> Pin<Box<dyn Future<Output=()> + Send + Sync>> + Send + Sync>>>) {
         let message_type = client_message.get_message_type().await;
         if message_type == Self::EVENT_DISTRIBUTED_OBJECT_MESSAGE_TYPE && handle_distributed_object_event.is_some() {
             let initial_frame = client_message.next_frame().await.unwrap();
@@ -60,7 +60,7 @@ impl ClientAddDistributedObjectListenerCodec {
             let name = StringCodec::decode(client_message).await;
             let service_name = StringCodec::decode(client_message).await;
             let event_type = StringCodec::decode(client_message).await;
-            handle_distributed_object_event.unwrap()(name, service_name, event_type, source);
+            handle_distributed_object_event.unwrap()(name, service_name, event_type, source).await;
             return;
         }
     }

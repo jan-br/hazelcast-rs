@@ -1,6 +1,7 @@
 #![feature(async_closure)]
 #![feature(fn_traits)]
 #![feature(trait_upcasting)]
+#![feature(trait_alias)]
 
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::sync::Arc;
@@ -9,6 +10,7 @@ use crate::client::HazelcastClient;
 use crate::config::ClientConfig;
 use crate::config::network::ClientNetworkConfig;
 use crate::connection::address::provider::DefaultAddressProvider;
+use crate::proxy::event_type::EventType;
 
 pub mod cluster;
 pub mod config;
@@ -25,6 +27,7 @@ pub mod partition_service;
 pub mod proxy;
 pub mod build_info;
 pub mod lifecycle_service;
+pub mod listener;
 
 pub mod codec {
   pub mod client_authentication_codec;
@@ -33,6 +36,8 @@ pub mod codec {
   pub mod client_create_proxy_codec;
   pub mod map_get_codec;
   pub mod map_put_codec;
+  pub mod map_add_entry_listener_codec;
+  pub mod map_remove_entry_listener_codec;
 
   pub mod custom {
     pub mod address_codec;
@@ -58,5 +63,10 @@ pub async fn main() {
 
   let test_map = client.get_map::<Option<String>, Option<String>>("test").await;
   let option = test_map.get(&Some("key".to_string())).await;
+  test_map.add_entry_listener::<{EventType::ALL}>(|event| Box::pin(async move {
+    println!("Event {}", event.key.unwrap().unwrap() );
+  })).await;
+  test_map.put(Some("key".to_string()), Some("value".to_string())).await;
   dbg!(option);
+  tokio::time::sleep(Duration::from_secs(1000)).await;
 }

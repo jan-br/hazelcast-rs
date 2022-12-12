@@ -48,7 +48,7 @@ impl MapRemoveIfSameCodec {
         Box::pin(async move {
             let initial_frame = client_message.next_frame().await.unwrap();
 
-            FixSizedTypesCodec::decode_boolean(&*initial_frame.content.lock().await, Self::RESPONSE_RESPONSE_OFFSET).await
+            let x = FixSizedTypesCodec::decode_boolean(&*initial_frame.content.lock().await, Self::RESPONSE_RESPONSE_OFFSET).await; x
         })
     }
 

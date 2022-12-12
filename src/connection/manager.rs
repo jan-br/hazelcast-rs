@@ -11,6 +11,7 @@ use tokio::net::TcpStream;
 use tokio::sync::RwLock;
 use tokio::time::timeout;
 use uuid::Uuid;
+use tokio::sync::Mutex;
 
 use crate::cluster::candidate::CandidateClusterContext;
 use crate::cluster::failover::ClusterFailoverService;
@@ -102,21 +103,21 @@ impl ConnectionManager {
   pub async fn do_connect_to_cluster(&self) {
     let current_context = self.cluster_failover_service.current().await;
     self.do_connect_to_candidate_cluster(current_context)
-        .then(|connected| async move {
-          if connected {
-            true
-          } else {
-            self.cluster_failover_service
-                .try_next_cluster(|context| self.cleanup_and_try_next_cluster(context))
-                .await
-          }
-        })
-        .then(|connected| async move {
-          if !connected {
-            todo!("Unable to connect to any cluster")
-          }
-        })
-        .await;
+      .then(|connected| async move {
+        if connected {
+          true
+        } else {
+          self.cluster_failover_service
+            .try_next_cluster(|context| self.cleanup_and_try_next_cluster(context))
+            .await
+        }
+      })
+      .then(|connected| async move {
+        if !connected {
+          todo!("Unable to connect to any cluster")
+        }
+      })
+      .await;
   }
 
   pub async fn cleanup_and_try_next_cluster(
@@ -127,14 +128,14 @@ impl ConnectionManager {
     let mut switching_to_next_cluster = self.switching_to_next_cluster.write().await;
     *switching_to_next_cluster = true;
     self.do_connect_to_candidate_cluster(next_context)
-        .then(|connected| async move {
-          if connected {
-            todo!()
-          } else {
-            false
-          }
-        })
-        .await
+      .then(|connected| async move {
+        if connected {
+          todo!()
+        } else {
+          false
+        }
+      })
+      .await
   }
 
   pub async fn do_connect_to_candidate_cluster(
@@ -144,7 +145,7 @@ impl ConnectionManager {
     let tried_addresses = vec![];
     self.wait_strategy.write().await.reset();
     self.try_connecting_to_addresses(context, tried_addresses)
-        .await
+      .await
   }
 
   pub async fn try_connecting_to_addresses(
@@ -158,30 +159,30 @@ impl ConnectionManager {
 
       let members = self.cluster_service.get_members(None).await;
       let connected = self
-          .try_connecting(
-            &members,
-            tried_addresses_per_attempt,
-            |m| m.address.clone(),
-            |m| self.get_or_connect_to_member(m),
-          )
-          .await;
+        .try_connecting(
+          &members,
+          tried_addresses_per_attempt,
+          |m| m.address.clone(),
+          |m| self.get_or_connect_to_member(m),
+        )
+        .await;
 
       let connected = if connected {
         true
       } else {
         let addresses = self
-            .load_addresses_from_provider(context.address_provider.clone())
-            .await
-            .into_iter()
-            .filter(|address| !tried_addresses_per_attempt.contains(&address.to_string()))
-            .collect::<Vec<_>>();
+          .load_addresses_from_provider(context.address_provider.clone())
+          .await
+          .into_iter()
+          .filter(|address| !tried_addresses_per_attempt.contains(&address.to_string()))
+          .collect::<Vec<_>>();
         self.try_connecting(
           &addresses,
           tried_addresses_per_attempt,
           |a| (*a).clone(),
           |a| self.get_or_connect_to_address(a),
         )
-            .await
+          .await
       };
       if connected {
         return true;
@@ -210,7 +211,7 @@ impl ConnectionManager {
         return connection;
       }
       self.get_or_connect(address.clone(), || self.translate_address(address))
-          .await
+        .await
     })
   }
 
@@ -256,7 +257,13 @@ impl ConnectionManager {
             let tcp_stream: TcpStream = receiver.await.unwrap().unwrap();
             let (read_half, mut write_half) = tcp_stream.into_split();
             self.initiate_communication(&mut write_half).await;
-            let connection = Connection::new(translated_address, write_half, read_half);
+
+            lazy_static::lazy_static! {
+              static ref CONNECTION_ID: Mutex<i32> = Mutex::new(0);
+            }
+            let mut id = CONNECTION_ID.lock().await;
+            *id+=1;
+            let connection = Connection::new(translated_address, write_half, read_half, *id);
 
             tokio::spawn({
               let connection = connection.clone();
@@ -300,15 +307,15 @@ impl ConnectionManager {
     })));
     let response = timeout(
       self.heartbeat_manager
-          .hartbeat_timeout
-          .clone()
-          .to_std()
-          .unwrap(),
+        .hartbeat_timeout
+        .clone()
+        .to_std()
+        .unwrap(),
       self.invocation_service
-          .invoke_urgent(&self.connection_registry, invocation),
+        .invoke_urgent(&self.connection_registry, invocation),
     )
-        .await
-        .unwrap();
+      .await
+      .unwrap();
 
     let authentication_status = response.status;
 
@@ -398,7 +405,7 @@ impl ConnectionManager {
       client_name,
       &vec![],
     )
-        .await
+      .await
   }
 
   pub async fn initiate_communication(&self, stream: &mut OwnedWriteHalf) {
@@ -421,7 +428,7 @@ impl ConnectionManager {
     tokio::spawn({
       async move {
         match TcpStream::connect((translated_addres.host.clone(), translated_addres.port as u16))
-            .await
+          .await
         {
           Ok(tcp_stream) => {
             sender.send(Some(tcp_stream)).unwrap();
@@ -477,8 +484,8 @@ impl ConnectionManager {
       let address = get_address_fn(item.clone());
       tried_addresses.push(address.to_string());
       let connection = self
-          .connect(item.clone(), || connect_to_fn(item.clone()))
-          .await;
+        .connect(item.clone(), || connect_to_fn(item.clone()))
+        .await;
       if connection.is_some() {
         return true;
       }

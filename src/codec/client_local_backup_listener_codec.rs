@@ -44,17 +44,17 @@ impl ClientLocalBackupListenerCodec {
         Box::pin(async move {
             let initial_frame = client_message.next_frame().await.unwrap();
 
-            FixSizedTypesCodec::decode_uuid(&*initial_frame.content.lock().await, Self::RESPONSE_RESPONSE_OFFSET).await
+            let x = FixSizedTypesCodec::decode_uuid(&*initial_frame.content.lock().await, Self::RESPONSE_RESPONSE_OFFSET).await; x
         })
     }
 
 
-    pub async fn handle(client_message: &mut ClientMessage, handle_backup_event: Option<impl Fn(i64)>) {
+    pub async fn handle(client_message: &mut ClientMessage, handle_backup_event: Option<Pin<Box<dyn Fn(i64) -> Pin<Box<dyn Future<Output=()> + Send + Sync>> + Send + Sync>>>) {
         let message_type = client_message.get_message_type().await;
         if message_type == Self::EVENT_BACKUP_MESSAGE_TYPE && handle_backup_event.is_some() {
             let initial_frame = client_message.next_frame().await.unwrap();
             let source_invocation_correlation_id = FixSizedTypesCodec::decode_long(&mut *initial_frame.content.lock().await, Self::EVENT_BACKUP_SOURCE_INVOCATION_CORRELATION_ID_OFFSET).await;
-            handle_backup_event.unwrap()(source_invocation_correlation_id);
+            handle_backup_event.unwrap()(source_invocation_correlation_id).await;
             return;
         }
     }

@@ -42,7 +42,7 @@ impl Member {
 
 pub struct MemberListSnapshot {
   pub version: i32,
-  pub members: HashMap<String, Member>,
+  pub members: HashMap<String, Arc<Member>>,
   pub member_list: Vec<Arc<Member>>,
 }
 

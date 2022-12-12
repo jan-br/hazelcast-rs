@@ -8,6 +8,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 use chrono::Duration;
 use tokio::sync::{RwLock, RwLockWriteGuard};
+use uuid::Uuid;
 use crate::ClientConfig;
 use crate::codec_builtin::error_codec::ErrorCodec;
 use crate::connection::registry::ConnectionRegistry;
@@ -23,6 +24,7 @@ pub struct InvocationService {
   pub invocation_timeout: Duration,
   pub correllation_counter: RwLock<u64>,
   pub invocations: RwLock<HashMap<u64, Arc<RwLock<Invocation<Box<Box<dyn AnySend>>>>>>>,
+  pub invocations_with_event_handlers: RwLock<HashMap<u64, Arc<RwLock<Invocation<Box<Box<dyn AnySend>>>>>>>,
 }
 
 impl InvocationService {
@@ -32,6 +34,7 @@ impl InvocationService {
       invocation_timeout: Duration::seconds(10),
       correllation_counter: RwLock::new(1),
       invocations: RwLock::new(HashMap::new()),
+      invocations_with_event_handlers: RwLock::new(HashMap::new()),
     }
   }
 
@@ -111,28 +114,36 @@ impl InvocationService {
     } else {
       return;
     };
-    let invocation = self.invocations.write().await.get(&correlation_id).cloned();
+
     if start_frame.has_event_flag().await || start_frame.has_backup_event_flag().await {
-      if invocation.is_none() {
-        //todo: Add retry logic for missing invocation handler
-        todo!()
+      let invocation = self.invocations_with_event_handlers.read().await.get(&correlation_id).cloned();
+      if let Some(invocation) = invocation {
+        self.call_event_handler_with_message(invocation, client_message);
       }
       return;
     }
 
-    if invocation.is_none() {
-      //todo: Add proper logging
-      return;
+    let pending_invocation = self.invocations.write().await.remove(&correlation_id);
+
+    if pending_invocation.is_none() {
+      todo!()
     }
-    let invocation = invocation.unwrap();
 
     let message_type = client_message.get_message_type().await;
     if message_type == ErrorCodec::EXCEPTION_MESSAGE_TYPE {
-      todo!("implement error handling")
+      todo!()
     } else {
-      invocation.write().await.notify(client_message).await;
+      pending_invocation.unwrap().write().await.notify(client_message).await;
     }
   }
+
+  pub fn call_event_handler_with_message(&self, invocation: Arc<RwLock<Invocation<Box<Box<dyn AnySend>>>>>, client_message: ClientMessage) {
+    tokio::spawn(async move {
+      let invocation = invocation.read().await;
+      invocation.event_handler.clone().unwrap().call((client_message, )).await;
+    });
+  }
+
 
   pub async fn send<R: InvocationReturnValue + Clone>(&self, invocation: Arc<RwLock<Invocation<Box<Box<R>>>>>, connection: Connection) {
     //todo check if connection is alive
@@ -164,9 +175,11 @@ impl InvocationService {
       correlation_id
     };
     let mut invocations = self.invocations.write().await;
+    if invocation.read().await.event_handler.is_some() {
+      self.invocations_with_event_handlers.write().await.insert(correlation_id, unsafe { transmute(invocation.clone()) });
+    }
 
-
-    invocations.insert(correlation_id, unsafe { std::mem::transmute(invocation) });
+    invocations.insert(correlation_id, unsafe { transmute(invocation) });
   }
 
   pub async fn notify_error<R: InvocationReturnValue + Clone>(&self, invocation: &mut Invocation<Box<R>>, error: String) {

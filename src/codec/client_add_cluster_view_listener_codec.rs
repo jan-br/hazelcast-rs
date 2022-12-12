@@ -47,20 +47,20 @@ impl ClientAddClusterViewListenerCodec {
     }
 
 
-    pub async fn handle(client_message: &mut ClientMessage, handle_members_view_event: Option<impl Fn(i32, Vec<MemberInfo>)>, handle_partitions_view_event: Option<impl Fn(i32, Vec<(Uuid, Vec<i32>)>)>) {
+    pub async fn handle(client_message: &mut ClientMessage, handle_members_view_event: Option<Pin<Box<dyn Fn(i32, Vec<MemberInfo>) -> Pin<Box<dyn Future<Output=()> + Send + Sync>> + Send + Sync>>>, handle_partitions_view_event: Option<Pin<Box<dyn Fn(i32, Vec<(Uuid, Vec<i32>)>) -> Pin<Box<dyn Future<Output=()> + Send + Sync>> + Send + Sync>>>) {
         let message_type = client_message.get_message_type().await;
         if message_type == Self::EVENT_MEMBERS_VIEW_MESSAGE_TYPE && handle_members_view_event.is_some() {
             let initial_frame = client_message.next_frame().await.unwrap();
             let version = FixSizedTypesCodec::decode_int(&mut *initial_frame.content.lock().await, Self::EVENT_MEMBERS_VIEW_VERSION_OFFSET).await;
             let member_infos = ListMultiFrameCodec::decode(client_message, MemberInfoCodec::decode).await;
-            handle_members_view_event.unwrap()(version, member_infos);
+            handle_members_view_event.unwrap()(version, member_infos).await;
             return;
         }
         if message_type == Self::EVENT_PARTITIONS_VIEW_MESSAGE_TYPE && handle_partitions_view_event.is_some() {
             let initial_frame = client_message.next_frame().await.unwrap();
             let version = FixSizedTypesCodec::decode_int(&mut *initial_frame.content.lock().await, Self::EVENT_PARTITIONS_VIEW_VERSION_OFFSET).await;
             let partitions = EntryListUUIDListIntegerCodec::decode(client_message).await;
-            handle_partitions_view_event.unwrap()(version, partitions);
+            handle_partitions_view_event.unwrap()(version, partitions).await;
             return;
         }
     }

@@ -14,6 +14,8 @@ pub mod imap;
 pub mod manager;
 pub mod map_proxy;
 pub mod base;
+pub mod entry_event;
+pub mod event_type;
 
 pub trait Proxy: ProxyBaseLogic + 'static {
   const SERVICE_NAME: &'static str;

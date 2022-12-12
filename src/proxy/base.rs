@@ -3,10 +3,12 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
+use crate::cluster::service::ClusterService;
 use crate::connection::registry::ConnectionRegistry;
 use crate::core::distributed_object::DistributedObject;
 use crate::invocation::InvocationReturnValue;
 use crate::invocation::service::InvocationService;
+use crate::listener::service::ListenerService;
 use crate::partition_service::PartitionService;
 use crate::protocol::client_message::ClientMessage;
 use crate::proxy::Proxy;
@@ -25,6 +27,8 @@ pub struct ProxyBase {
   pub invocation_service: Arc<InvocationService>,
   pub serialization_service: Arc<SerializationServiceV1>,
   pub connection_registry: Arc<ConnectionRegistry>,
+  pub listener_service: Arc<ListenerService>,
+  pub cluster_service: Arc<ClusterService>,
 }
 
 impl ProxyBase {
@@ -35,6 +39,8 @@ impl ProxyBase {
     partition_service: Arc<PartitionService>,
     invocation_service: Arc<InvocationService>,
     serialization_service: Arc<SerializationServiceV1>,
+    listener_service: Arc<ListenerService>,
+    cluster_service: Arc<ClusterService>,
   ) -> Self {
     ProxyBase {
       name,
@@ -43,6 +49,8 @@ impl ProxyBase {
       partition_service,
       invocation_service,
       serialization_service,
+      listener_service,
+      cluster_service,
     }
   }
   pub fn to_data<T: Serializable + 'static>(&self, object: Box<T>) -> HeapData {

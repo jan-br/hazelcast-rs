@@ -25,7 +25,7 @@ impl MapAddPartitionLostListenerCodec {
     const REQUEST_INITIAL_FRAME_SIZE: usize = Self::REQUEST_LOCAL_ONLY_OFFSET + BitsUtil::BOOLEAN_SIZE_IN_BYTES as usize;
     const RESPONSE_RESPONSE_OFFSET: usize = ClientMessage::RESPONSE_BACKUP_ACKS_OFFSET as usize + BitsUtil::BYTE_SIZE_IN_BYTES as usize;
     const EVENT_MAP_PARTITION_LOST_PARTITION_ID_OFFSET: usize = ClientMessage::PARTITION_ID_OFFSET as usize + BitsUtil::INT_SIZE_IN_BYTES as usize;
-    const EVENT_MAP_PARTITION_LOST_UUID_OFFSET: usize = EVENT_MAP_PARTITION_LOST_PARTITION_ID_OFFSET as usize+ BitsUtil::INT_SIZE_IN_BYTES as usize;
+    const EVENT_MAP_PARTITION_LOST_UUID_OFFSET: usize = Self::EVENT_MAP_PARTITION_LOST_PARTITION_ID_OFFSET as usize+ BitsUtil::INT_SIZE_IN_BYTES as usize;
 
     pub fn encode_request<'a>(name: &'a String, local_only: &'a bool) -> Pin<Box<dyn Future<Output=ClientMessage> + Send + Sync + 'a>> {
         Box::pin(async move {
@@ -49,18 +49,18 @@ impl MapAddPartitionLostListenerCodec {
         Box::pin(async move {
             let initial_frame = client_message.next_frame().await.unwrap();
 
-            FixSizedTypesCodec::decode_uuid(&*initial_frame.content.lock().await, Self::RESPONSE_RESPONSE_OFFSET).await
+            let x = FixSizedTypesCodec::decode_uuid(&*initial_frame.content.lock().await, Self::RESPONSE_RESPONSE_OFFSET).await; x
         })
     }
 
 
-    pub async fn handle(client_message: &mut ClientMessage, handle_map_partition_lost_event: Option<impl Fn(i32, Uuid)>) {
+    pub async fn handle(client_message: &mut ClientMessage, handle_map_partition_lost_event: Option<Pin<Box<dyn Fn(i32, Uuid) -> Pin<Box<dyn Future<Output=()> + Send + Sync>> + Send + Sync>>>) {
         let message_type = client_message.get_message_type().await;
         if message_type == Self::EVENT_MAP_PARTITION_LOST_MESSAGE_TYPE && handle_map_partition_lost_event.is_some() {
             let initial_frame = client_message.next_frame().await.unwrap();
             let partition_id = FixSizedTypesCodec::decode_int(&mut *initial_frame.content.lock().await, Self::EVENT_MAP_PARTITION_LOST_PARTITION_ID_OFFSET).await;
             let uuid = FixSizedTypesCodec::decode_uuid(&mut *initial_frame.content.lock().await, Self::EVENT_MAP_PARTITION_LOST_UUID_OFFSET).await;
-            handle_map_partition_lost_event.unwrap()(partition_id, uuid);
+            handle_map_partition_lost_event.unwrap()(partition_id, uuid).await;
             return;
         }
     }

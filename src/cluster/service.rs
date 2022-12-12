@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::RwLock;
+use uuid::Uuid;
 use crate::ClientConfig;
 use crate::cluster::failover::ClusterFailoverService;
 use crate::core::member::{Member, MemberListSnapshot, MemberSelector};
@@ -30,6 +31,10 @@ impl ClusterService {
       let selector = selector.unwrap();
       members.into_iter().filter(|member| selector(member)).collect::<Vec<_>>()
     }
+  }
+
+  pub async fn get_member(&self, uuid: Uuid) -> Option<Arc<Member>> {
+    self.member_list_snapshot.read().await.members.get(&uuid.to_string()).cloned()
   }
 
   async fn get_member_list(&self) -> Vec<Arc<Member>> {

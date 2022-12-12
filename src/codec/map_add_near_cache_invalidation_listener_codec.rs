@@ -34,8 +34,8 @@ impl MapAddNearCacheInvalidationListenerCodec {
     const REQUEST_INITIAL_FRAME_SIZE: usize = Self::REQUEST_LOCAL_ONLY_OFFSET + BitsUtil::BOOLEAN_SIZE_IN_BYTES as usize;
     const RESPONSE_RESPONSE_OFFSET: usize = ClientMessage::RESPONSE_BACKUP_ACKS_OFFSET as usize + BitsUtil::BYTE_SIZE_IN_BYTES as usize;
     const EVENT_I_MAP_INVALIDATION_SOURCE_UUID_OFFSET: usize = ClientMessage::PARTITION_ID_OFFSET as usize + BitsUtil::INT_SIZE_IN_BYTES as usize;
-    const EVENT_I_MAP_INVALIDATION_PARTITION_UUID_OFFSET: usize = EVENT_I_MAP_INVALIDATION_SOURCE_UUID_OFFSET as usize+ BitsUtil::UUID_SIZE_IN_BYTES as usize;
-    const EVENT_I_MAP_INVALIDATION_SEQUENCE_OFFSET: usize = EVENT_I_MAP_INVALIDATION_PARTITION_UUID_OFFSET as usize+ BitsUtil::UUID_SIZE_IN_BYTES as usize;
+    const EVENT_I_MAP_INVALIDATION_PARTITION_UUID_OFFSET: usize = Self::EVENT_I_MAP_INVALIDATION_SOURCE_UUID_OFFSET as usize+ BitsUtil::UUID_SIZE_IN_BYTES as usize;
+    const EVENT_I_MAP_INVALIDATION_SEQUENCE_OFFSET: usize = Self::EVENT_I_MAP_INVALIDATION_PARTITION_UUID_OFFSET as usize+ BitsUtil::UUID_SIZE_IN_BYTES as usize;
 
     pub fn encode_request<'a>(name: &'a String, listener_flags: &'a i32, local_only: &'a bool) -> Pin<Box<dyn Future<Output=ClientMessage> + Send + Sync + 'a>> {
         Box::pin(async move {
@@ -60,12 +60,12 @@ impl MapAddNearCacheInvalidationListenerCodec {
         Box::pin(async move {
             let initial_frame = client_message.next_frame().await.unwrap();
 
-            FixSizedTypesCodec::decode_uuid(&*initial_frame.content.lock().await, Self::RESPONSE_RESPONSE_OFFSET).await
+            let x = FixSizedTypesCodec::decode_uuid(&*initial_frame.content.lock().await, Self::RESPONSE_RESPONSE_OFFSET).await; x
         })
     }
 
 
-    pub async fn handle(client_message: &mut ClientMessage, handle_i_map_invalidation_event: Option<impl Fn(HeapData, Uuid, Uuid, i64)>, handle_i_map_batch_invalidation_event: Option<impl Fn(Data[], UUID[], UUID[], Long[])>) {
+    pub async fn handle(client_message: &mut ClientMessage, handle_i_map_invalidation_event: Option<Pin<Box<dyn Fn(Option<HeapData>, Uuid, Uuid, i64) -> Pin<Box<dyn Future<Output=()> + Send + Sync>> + Send + Sync>>>, handle_i_map_batch_invalidation_event: Option<Pin<Box<dyn Fn(Data[], UUID[], UUID[], Long[]) -> Pin<Box<dyn Future<Output=()> + Send + Sync>> + Send + Sync>>>) {
         let message_type = client_message.get_message_type().await;
         if message_type == Self::EVENT_I_MAP_INVALIDATION_MESSAGE_TYPE && handle_i_map_invalidation_event.is_some() {
             let initial_frame = client_message.next_frame().await.unwrap();
@@ -73,7 +73,7 @@ impl MapAddNearCacheInvalidationListenerCodec {
             let partition_uuid = FixSizedTypesCodec::decode_uuid(&mut *initial_frame.content.lock().await, Self::EVENT_I_MAP_INVALIDATION_PARTITION_UUID_OFFSET).await;
             let sequence = FixSizedTypesCodec::decode_long(&mut *initial_frame.content.lock().await, Self::EVENT_I_MAP_INVALIDATION_SEQUENCE_OFFSET).await;
             let key = CodecUtil::decode_nullable(client_message, DataCodec::decode).await;
-            handle_i_map_invalidation_event.unwrap()(key, source_uuid, partition_uuid, sequence);
+            handle_i_map_invalidation_event.unwrap()(key, source_uuid, partition_uuid, sequence).await;
             return;
         }
         if message_type == Self::EVENT_I_MAP_BATCH_INVALIDATION_MESSAGE_TYPE && handle_i_map_batch_invalidation_event.is_some() {
@@ -83,7 +83,7 @@ impl MapAddNearCacheInvalidationListenerCodec {
             let source_uuids = ListUUIDCodec::decode(client_message).await;
             let partition_uuids = ListUUIDCodec::decode(client_message).await;
             let sequences = ListLongCodec::decode(client_message).await;
-            handle_i_map_batch_invalidation_event.unwrap()(keys, source_uuids, partition_uuids, sequences);
+            handle_i_map_batch_invalidation_event.unwrap()(keys, source_uuids, partition_uuids, sequences).await;
             return;
         }
     }
