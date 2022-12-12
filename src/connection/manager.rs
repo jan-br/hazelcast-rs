@@ -285,6 +285,7 @@ impl ConnectionManager {
                 .await;
 
             let connection = self.authenticate_on_cluster(connection).await;
+            println!("Authenticated on cluster");
             connection_resolver.resolve(connection).await;
           }
         }
