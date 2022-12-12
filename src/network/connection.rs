@@ -78,7 +78,7 @@ impl Connection {
       //todo: Add byte counter statistic
       // self.increment_bytes_read_fn(buffer.len());
     }
-    todo!()
+    //todo: Add logging?
   }
 
   pub async fn set_read_callback(&self, callback: Pin<Box<dyn Fn(ClientMessage) -> Pin<Box<dyn Future<Output=()> + Send + Sync>> + Send + Sync>>) {
