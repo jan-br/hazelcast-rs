@@ -69,7 +69,7 @@ impl HazelcastClient {
       partition_service,
       schema_service,
       serialization_service,
-      lifecycle_service
+      lifecycle_service,
     };
     client.init().await;
     client
@@ -88,7 +88,7 @@ impl HazelcastClient {
     self.connection_manager.connect_to_cluster().await;
   }
 
-  pub async fn get_map<K: Clone + Send + Sync + Serializable + 'static, V: Clone + Send + Sync + Serializable + 'static>(&mut self, name: impl ToString) -> MapProxy<K, V> {
+  pub async fn get_map<K: Clone + Send + Sync + Serializable + 'static, V: Clone + Send + Sync + Serializable + 'static>(&self, name: impl ToString) -> MapProxy<K, V> {
     self.proxy_manager.get_or_create_proxy(name.to_string(), true).await
   }
 }
