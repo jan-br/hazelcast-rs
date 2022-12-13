@@ -5,6 +5,7 @@ use std::marker::PhantomData;
 use std::mem::transmute;
 use std::pin::Pin;
 use std::sync::Arc;
+use std::time::Duration;
 
 use lazy_static::lazy_static;
 use tokio::sync::RwLock;
@@ -122,11 +123,17 @@ impl<K: Serializable + Send + Sync + Clone + 'static, V: Serializable + 'static 
   pub async fn put(&self, key: K, value: V) {
     let key_data = self.base.to_data(Box::new(key));
     let value_data = self.base.to_data(Box::new(value));
-    self.put_internal(key_data, value_data).await;
+    self.put_internal(key_data, value_data, None).await;
+  }
+
+  pub async fn put_with_ttl(&self, key: K, value: V, ttl: Duration) {
+    let key_data = self.base.to_data(Box::new(key));
+    let value_data = self.base.to_data(Box::new(value));
+    self.put_internal(key_data, value_data, Some(ttl)).await;
   }
 
 
-  async fn put_internal(&self, key_data: HeapData, value_data: HeapData) {
+  async fn put_internal(&self, key_data: HeapData, value_data: HeapData, ttl: Option<Duration>) {
     self.base.encode_invoke_on_key(
       key_data.clone(),
       Box::pin({
@@ -134,7 +141,7 @@ impl<K: Serializable + Send + Sync + Clone + 'static, V: Serializable + 'static 
           let key_data = key_data.clone();
           let value_data = value_data.clone();
           async move {
-            MapPutCodec::encode_request(&name, &key_data, &value_data, &0, &0).await
+            MapPutCodec::encode_request(&name, &key_data, &value_data, &0, &ttl.map(|ttl|ttl.as_secs() as i64).unwrap_or(-1)).await
           }
         })
       }),
