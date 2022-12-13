@@ -23,6 +23,14 @@ impl LifecycleService {
       active: Arc::new(RwLock::new(false))
     }
   }
+
+  pub async fn start(&self) {
+    self.emit_lifecycle_event(LifecycleState::Starting).await;
+    *self.active.write().await = true;
+    self.emit_lifecycle_event(LifecycleState::Started).await;
+  }
+
+
   pub async fn emit_lifecycle_event(&self, state: LifecycleState) {
     //todo: log
     self.bag.read().await.call_simple( &state)

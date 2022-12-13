@@ -24,6 +24,7 @@ pub struct HazelcastClient {
   serialization_service: Arc<SerializationServiceV1>,
   schema_service: Arc<SchemaService>,
   proxy_manager: Arc<ProxyManager>,
+  lifecycle_service: Arc<LifecycleService>,
 }
 
 impl HazelcastClient {
@@ -58,7 +59,7 @@ impl HazelcastClient {
     let listener_service = Arc::new(ListenerService::new(invocation_service.clone(), connection_manager.clone()));
     let proxy_manager = Arc::new(ProxyManager::new(partition_service.clone(), connection_registry.clone(), invocation_service.clone(), serialization_service.clone(), listener_service.clone(), cluster_service.clone()));
 
-    HazelcastClient {
+    let client = HazelcastClient {
       proxy_manager,
       connection_manager,
       active: false,
@@ -68,7 +69,14 @@ impl HazelcastClient {
       partition_service,
       schema_service,
       serialization_service,
-    }
+      lifecycle_service
+    };
+    client.init().await;
+    client
+  }
+
+  async fn init(&self) {
+    self.lifecycle_service.start().await;
   }
 
   pub async fn start(&mut self) {
