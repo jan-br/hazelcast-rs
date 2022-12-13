@@ -141,7 +141,7 @@ impl<K: Serializable + Send + Sync + Clone + 'static, V: Serializable + 'static 
           let key_data = key_data.clone();
           let value_data = value_data.clone();
           async move {
-            MapPutCodec::encode_request(&name, &key_data, &value_data, &0, &ttl.map(|ttl|ttl.as_secs() as i64).unwrap_or(-1)).await
+            MapPutCodec::encode_request(&name, &key_data, &value_data, &0, &ttl.map(|ttl|ttl.as_millis() as i64).unwrap_or(-1)).await
           }
         })
       }),
