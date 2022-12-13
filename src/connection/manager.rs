@@ -222,9 +222,13 @@ impl ConnectionManager {
       if connection.is_some() {
         return connection;
       }
-      // self.get_or_connect(address.clone(), || self.translate_address(address))
-      //   .await
-      todo!()
+      self.get_or_connect(address.clone(), {
+        let this = self.clone();
+        move || Box::pin(async move {
+          this.translate_address(address).await
+        })
+      })
+      .await
     })
   }
 
@@ -302,64 +306,6 @@ impl ConnectionManager {
         pending_connections.remove(&address_key);
         connection
       });
-
-
-      // let (_, (connection)) = join!(translate_address_fn()
-      //   .then(|translated| async move {
-      //     if translated.is_none() {
-      //       todo!("Unable to translate address");
-      //     }
-      //     (
-      //       self.trigger_connect(translated.clone().unwrap()).await.lock().await,
-      //       translated.unwrap(),
-      //     )
-      //   })
-      //   .then({
-      //    let mut connection_resolver = connection_resolver.clone();
-      //     let this = self.clone();
-      //    move |(receiver, translated_address)| {
-      //     let mut connection_resolver = connection_resolver.clone();
-      //     async move {
-      //       let tcp_stream: TcpStream = receiver.await.unwrap().unwrap();
-      //       let (read_half, mut write_half) = tcp_stream.into_split();
-      //       self.initiate_communication(&mut write_half).await;
-      //
-      //       lazy_static::lazy_static! {
-      //         static ref CONNECTION_ID: Mutex<i32> = Mutex::new(0);
-      //       }
-      //       let mut id = CONNECTION_ID.lock().await;
-      //       *id+=1;
-      //       let connection = Connection::new(translated_address, write_half, read_half, *id, this);
-      //
-      //       tokio::spawn({
-      //         let connection = connection.clone();
-      //         async move {
-      //           connection.start_reader().await;
-      //         }
-      //       });
-      //       connection
-      //           .set_read_callback({
-      //             let invocation_service = self.invocation_service.clone();
-      //             Box::pin(move |response| Box::pin({
-      //               let invocation_service = invocation_service.clone();
-      //               async move {
-      //                 let response = response.clone();
-      //                 invocation_service.process_response(response).await;
-      //               }
-      //             }))
-      //           })
-      //           .await;
-      //
-      //       let connection = self.authenticate_on_cluster(connection).await;
-      //       println!("Authenticated on cluster");
-      //       connection_resolver.resolve(connection).await;
-      //     }
-      //   }
-      // }), async move {
-      //   let connection = connection_resolver.wait().await.unwrap();
-      //   pending_connections.remove(&address_key);
-      //   connection
-      // });
 
 
       Some(connection)
