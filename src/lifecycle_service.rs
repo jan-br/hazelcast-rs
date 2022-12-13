@@ -12,17 +12,23 @@ pub enum LifecycleState {
 }
 
 pub struct LifecycleService {
-  pub bag: Arc<RwLock<Bag<Arc<dyn Fn(&LifecycleState) + Send + Sync>, LifecycleState>>>
+  pub bag: Arc<RwLock<Bag<Arc<dyn Fn(&LifecycleState) + Send + Sync>, LifecycleState>>>,
+  pub active: Arc<RwLock<bool>>
 }
 
 impl LifecycleService {
   pub fn new() -> Self {
     LifecycleService {
-      bag: Arc::new(RwLock::new(Bag::default()))
+      bag: Arc::new(RwLock::new(Bag::default())),
+      active: Arc::new(RwLock::new(false))
     }
   }
   pub async fn emit_lifecycle_event(&self, state: LifecycleState) {
     //todo: log
     self.bag.read().await.call_simple( &state)
+  }
+
+  pub async fn is_running(&self) -> bool {
+    self.active.read().await.clone()
   }
 }

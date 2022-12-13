@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
+use async_recursion::async_recursion;
 use event_listener_primitives::Bag;
 
 use futures::{FutureExt, join, StreamExt};
@@ -18,6 +19,7 @@ use crate::cluster::failover::ClusterFailoverService;
 use crate::cluster::service::ClusterService;
 use crate::codec::client_authentication_codec::{ClientAuthenticationCodec, ClientAuthenticationResponseParams};
 use crate::config::ClientConfig;
+use crate::config::connection::ReconnectMode;
 use crate::connection::address::Address;
 use crate::connection::registry::{ClientState, ConnectionRegistry};
 use crate::core::member::Member;
@@ -48,6 +50,9 @@ pub struct ConnectionManager {
   pub partition_service: Arc<PartitionService>,
   pub lifecycle_service: Arc<LifecycleService>,
   pub connection_added_bag: RwLock<Bag<Arc<dyn Fn(&Connection) + Send + Sync>, Connection>>,
+  pub connection_removed_bag: RwLock<Bag<Arc<dyn Fn(&Connection) + Send + Sync>, Connection>>,
+  pub reconnect_mode: RwLock<ReconnectMode>,
+  pub connect_to_cluster_task_submitted: RwLock<bool>,
 }
 
 impl ConnectionManager {
@@ -81,26 +86,33 @@ impl ConnectionManager {
     ConnectionManager {
       lifecycle_service,
       connection_added_bag: RwLock::new(Bag::default()),
+      connection_removed_bag: RwLock::new(Bag::default()),
       cluster_id: RwLock::new(None),
       cluster_failover_service,
       switching_to_next_cluster: RwLock::new(false),
       wait_strategy,
       config,
       cluster_service,
+      reconnect_mode: RwLock::new(connection_registry.clone().reconnect_mode.read().await.clone()),
       connection_registry,
       pending_connections: RwLock::new(HashMap::new()),
       client_uuid: Uuid::new_v4(),
       invocation_service,
       heartbeat_manager,
       partition_service,
+      connect_to_cluster_task_submitted: RwLock::new(false),
     }
   }
 
-  pub async fn connect_to_cluster(&self) {
+  pub async fn connect_to_cluster(
+    self: &Arc<ConnectionManager>,
+  ) {
     self.do_connect_to_cluster().await;
   }
 
-  pub async fn do_connect_to_cluster(&self) {
+  pub async fn do_connect_to_cluster(
+    self: &Arc<ConnectionManager>,
+  ) {
     let current_context = self.cluster_failover_service.current().await;
     self.do_connect_to_candidate_cluster(current_context)
       .then(|connected| async move {
@@ -121,7 +133,7 @@ impl ConnectionManager {
   }
 
   pub async fn cleanup_and_try_next_cluster(
-    &self,
+    self: &Arc<ConnectionManager>,
     next_context: Arc<CandidateClusterContext>,
   ) -> bool {
     //todo: notify client on cluster change
@@ -139,7 +151,7 @@ impl ConnectionManager {
   }
 
   pub async fn do_connect_to_candidate_cluster(
-    &self,
+    self: &Arc<ConnectionManager>,
     context: Arc<CandidateClusterContext>,
   ) -> bool {
     let tried_addresses = vec![];
@@ -149,7 +161,7 @@ impl ConnectionManager {
   }
 
   pub async fn try_connecting_to_addresses(
-    &self,
+    self: &Arc<ConnectionManager>,
     context: Arc<CandidateClusterContext>,
     mut tried_addresses: Vec<String>,
   ) -> bool {
@@ -200,9 +212,9 @@ impl ConnectionManager {
   }
 
   pub fn get_or_connect_to_address<'a>(
-    &'a self,
+    self: &'a Arc<ConnectionManager>,
     address: Arc<Address>,
-  ) -> Pin<Box<dyn Future<Output=Option<Connection>> + 'a>> {
+  ) -> Pin<Box<dyn Future<Output=Option<Connection>> + Send + Sync + 'a>> {
     Box::pin(async move {
       //todo: add shutdown check
 
@@ -210,12 +222,13 @@ impl ConnectionManager {
       if connection.is_some() {
         return connection;
       }
-      self.get_or_connect(address.clone(), || self.translate_address(address))
-        .await
+      // self.get_or_connect(address.clone(), || self.translate_address(address))
+      //   .await
+      todo!()
     })
   }
 
-  pub fn translate_address<'a>(&'a self, address: Arc<Address>) -> Pin<Box<dyn Future<Output=Option<Arc<Address>>> + 'a>> {
+  pub fn translate_address<'a>(&'a self, address: Arc<Address>) -> Pin<Box<dyn Future<Output=Option<Arc<Address>>> + Send + Sync + 'a>> {
     Box::pin(async move {
       let current = self.cluster_failover_service.current().await;
       let address_provider = current.address_provider.clone();
@@ -223,80 +236,134 @@ impl ConnectionManager {
     })
   }
 
-  pub async fn get_or_connect<'a>(
-    &'a self,
+  pub fn get_or_connect<'a>(
+    self: &'a Arc<ConnectionManager>,
     address: Arc<Address>,
-    translate_address_fn: impl FnOnce() -> Pin<Box<dyn Future<Output=Option<Arc<Address>>> + 'a>>,
-  ) -> Option<Connection> {
-    let address_key = address.to_string();
-    let mut pending_connections = self.pending_connections.write().await;
+    translate_address_fn: impl FnOnce() -> Pin<Box<dyn Future<Output=Option<Arc<Address>>> + Send + Sync + 'a>> + Send + Sync + 'static,
+  ) -> Pin<Box<dyn Future<Output=Option<Connection>> + Send + Sync + 'a>> {
+    Box::pin(async move {
+      let address_key = address.to_string();
+      let mut pending_connections = self.pending_connections.write().await;
 
-    if let Some(pending_connection) = pending_connections.get_mut(&address_key) {
-      return Some(pending_connection.wait().await.unwrap());
-    }
+      if let Some(pending_connection) = pending_connections.get_mut(&address_key) {
+        return Some(pending_connection.wait().await.unwrap());
+      }
 
-    let mut connection_resolver = DeferredFuture::default();
-    pending_connections.insert(address_key.clone(), connection_resolver.clone());
+      let mut connection_resolver = DeferredFuture::default();
+      pending_connections.insert(address_key.clone(), connection_resolver.clone());
 
-
-    let (_, (connection)) = join!(translate_address_fn()
-        .then(|translated| async move {
-          if translated.is_none() {
+      let (_, (connection)) = join!({
+        let mut connection_resolver = connection_resolver.clone();
+        async move {
+        let translated = translate_address_fn().await;
+        if translated.is_none() {
             todo!("Unable to translate address");
-          }
-          (
-            self.trigger_connect(translated.clone().unwrap()).await,
-            translated.unwrap(),
-          )
-        })
-        .then({
-         let mut connection_resolver = connection_resolver.clone();
-         move |(receiver, translated_address)| {
-          let mut connection_resolver = connection_resolver.clone();
-          async move {
-            let tcp_stream: TcpStream = receiver.await.unwrap().unwrap();
-            let (read_half, mut write_half) = tcp_stream.into_split();
-            self.initiate_communication(&mut write_half).await;
-
-            lazy_static::lazy_static! {
-              static ref CONNECTION_ID: Mutex<i32> = Mutex::new(0);
-            }
-            let mut id = CONNECTION_ID.lock().await;
-            *id+=1;
-            let connection = Connection::new(translated_address, write_half, read_half, *id);
-
-            tokio::spawn({
-              let connection = connection.clone();
-              async move {
-                connection.start_reader().await;
-              }
-            });
-            connection
-                .set_read_callback({
-                  let invocation_service = self.invocation_service.clone();
-                  Box::pin(move |response| Box::pin({
-                    let invocation_service = invocation_service.clone();
-                    async move {
-                      let response = response.clone();
-                      invocation_service.process_response(response).await;
-                    }
-                  }))
-                })
-                .await;
-
-            let connection = self.authenticate_on_cluster(connection).await;
-            println!("Authenticated on cluster");
-            connection_resolver.resolve(connection).await;
-          }
         }
-      }), async move {
+
+        let receiver = self.trigger_connect(translated.clone().unwrap());
+        let translated_address = translated.unwrap();
+        let tcp_stream = receiver.await.unwrap().unwrap();
+        let (read_half, mut write_half) = tcp_stream.into_split();
+        self.initiate_communication(&mut write_half).await;
+
+        lazy_static::lazy_static! {
+          static ref CONNECTION_ID: Mutex<i32> = Mutex::new(0);
+        }
+        let mut id = CONNECTION_ID.lock().await;
+        *id+=1;
+        let connection = Connection::new(translated_address, write_half, read_half, *id, self.clone());
+
+        tokio::spawn({
+          let connection = connection.clone();
+          async move {
+            connection.start_reader().await;
+          }
+        });
+        connection
+            .set_read_callback({
+              let invocation_service = self.invocation_service.clone();
+              Box::pin(move |response| Box::pin({
+                let invocation_service = invocation_service.clone();
+                async move {
+                  let response = response.clone();
+                  invocation_service.process_response(response).await;
+                }
+              }))
+            })
+            .await;
+
+        let connection = self.authenticate_on_cluster(connection).await;
+        println!("Authenticated on cluster");
+        connection_resolver.resolve(connection).await;
+
+
+      }}, async move {
         let connection = connection_resolver.wait().await.unwrap();
         pending_connections.remove(&address_key);
         connection
       });
 
 
-    Some(connection)
+      // let (_, (connection)) = join!(translate_address_fn()
+      //   .then(|translated| async move {
+      //     if translated.is_none() {
+      //       todo!("Unable to translate address");
+      //     }
+      //     (
+      //       self.trigger_connect(translated.clone().unwrap()).await.lock().await,
+      //       translated.unwrap(),
+      //     )
+      //   })
+      //   .then({
+      //    let mut connection_resolver = connection_resolver.clone();
+      //     let this = self.clone();
+      //    move |(receiver, translated_address)| {
+      //     let mut connection_resolver = connection_resolver.clone();
+      //     async move {
+      //       let tcp_stream: TcpStream = receiver.await.unwrap().unwrap();
+      //       let (read_half, mut write_half) = tcp_stream.into_split();
+      //       self.initiate_communication(&mut write_half).await;
+      //
+      //       lazy_static::lazy_static! {
+      //         static ref CONNECTION_ID: Mutex<i32> = Mutex::new(0);
+      //       }
+      //       let mut id = CONNECTION_ID.lock().await;
+      //       *id+=1;
+      //       let connection = Connection::new(translated_address, write_half, read_half, *id, this);
+      //
+      //       tokio::spawn({
+      //         let connection = connection.clone();
+      //         async move {
+      //           connection.start_reader().await;
+      //         }
+      //       });
+      //       connection
+      //           .set_read_callback({
+      //             let invocation_service = self.invocation_service.clone();
+      //             Box::pin(move |response| Box::pin({
+      //               let invocation_service = invocation_service.clone();
+      //               async move {
+      //                 let response = response.clone();
+      //                 invocation_service.process_response(response).await;
+      //               }
+      //             }))
+      //           })
+      //           .await;
+      //
+      //       let connection = self.authenticate_on_cluster(connection).await;
+      //       println!("Authenticated on cluster");
+      //       connection_resolver.resolve(connection).await;
+      //     }
+      //   }
+      // }), async move {
+      //   let connection = connection_resolver.wait().await.unwrap();
+      //   pending_connections.remove(&address_key);
+      //   connection
+      // });
+
+
+      Some(connection)
+    })
   }
 
   pub async fn authenticate_on_cluster(&self, connection: Connection) -> Connection {
@@ -367,12 +434,16 @@ impl ConnectionManager {
     }
 
     //todo: log
-    self.emit_connection_added_event(connection.clone()).await;
+    self.emit_connection_added_event(&connection).await;
     connection
   }
 
-  pub async fn emit_connection_added_event(&self, connection: Connection) {
-    self.connection_added_bag.read().await.call_simple(&connection);
+  pub async fn emit_connection_removed_event(&self, connection: &Connection) {
+    self.connection_removed_bag.read().await.call_simple(connection);
+  }
+
+  pub async fn emit_connection_added_event(&self, connection: &Connection) {
+    self.connection_added_bag.read().await.call_simple(connection);
   }
 
   pub async fn emit_lifecycle_event(&self, state: LifecycleState) {
@@ -413,15 +484,15 @@ impl ConnectionManager {
     stream.write_all(b"CP2").await.unwrap();
   }
 
-  pub async fn trigger_connect(
+  pub fn trigger_connect(
     &self,
-    translated_addres: Arc<Address>,
+    translated_address: Arc<Address>,
   ) -> tokio::sync::oneshot::Receiver<Option<TcpStream>> {
     //todo: add ssl handling
-    self.connect_net_socket(translated_addres).await
+    self.connect_net_socket(translated_address)
   }
 
-  pub async fn connect_net_socket(
+  pub fn connect_net_socket(
     &self,
     translated_addres: Arc<Address>,
   ) -> tokio::sync::oneshot::Receiver<Option<TcpStream>> {
@@ -469,7 +540,7 @@ impl ConnectionManager {
   pub fn get_or_connect_to_member(
     &self,
     member: Arc<Member>,
-  ) -> Pin<Box<dyn Future<Output=Option<Connection>>>> {
+  ) -> Pin<Box<dyn Future<Output=Option<Connection>> + Send + Sync>> {
     todo!()
   }
 
@@ -478,7 +549,7 @@ impl ConnectionManager {
     items: &Vec<Arc<T>>,
     tried_addresses: &mut Vec<String>,
     get_address_fn: impl Fn(Arc<T>) -> Address,
-    connect_to_fn: impl Fn(Arc<T>) -> Pin<Box<dyn Future<Output=Option<Connection>> + 'a>>,
+    connect_to_fn: impl Fn(Arc<T>) -> Pin<Box<dyn Future<Output=Option<Connection>> + Send + Sync + 'a>> + Send + Sync,
   ) -> bool {
     for i in 0..items.len() {
       let item = &items[i];
@@ -528,10 +599,75 @@ impl ConnectionManager {
     // }
   }
 
+  pub fn on_connection_close<'a>(
+    self: &'a Arc<ConnectionManager>,
+    connection: &'a Connection,
+  ) -> Pin<Box<dyn Future<Output=()> + Send + Sync + 'a>> {
+    Box::pin(async move {
+      let endpoint = connection.remote_address.lock().await.clone();
+      let member_uuid = connection.remote_uuid.lock().await.clone();
+
+      if endpoint.is_none() {
+        todo!()
+      }
+
+      let active_connection = self.connection_registry.get_connection(member_uuid).await;
+
+      if let Some(active_connection) = active_connection {
+        if connection.connection_id == active_connection.connection_id {
+          self.connection_registry.delete_connection(member_uuid.unwrap()).await;
+          if self.connection_registry.is_empty().await {
+            let client_state = self.connection_registry.client_state.write().await;
+            if *client_state == ClientState::InitializedOnCluster {
+              self.emit_lifecycle_event(LifecycleState::Disconnected).await;
+            }
+            self.trigger_cluster_reconnection().await;
+          }
+          self.emit_connection_removed_event(connection).await;
+        } else {
+          todo!()
+        }
+      } else {
+        todo!()
+      }
+    })
+  }
+
+  pub fn trigger_cluster_reconnection<'a>(
+    self: &'a Arc<ConnectionManager>,
+  ) -> Pin<Box<dyn Future<Output=()> + Send + Sync + 'a>> {
+    Box::pin(async move {
+      if *self.reconnect_mode.read().await == ReconnectMode::Off {
+        todo!()
+      }
+
+      if self.lifecycle_service.is_running().await {
+        self.submit_connect_to_cluster_task().await;
+      }
+    })
+  }
+
+  fn submit_connect_to_cluster_task<'a>(
+    self: &'a Arc<ConnectionManager>,
+  ) -> Pin<Box<dyn Future<Output=()> + Send + Sync + 'a>> {
+    Box::pin(async move {
+      if *self.connect_to_cluster_task_submitted.read().await {
+        return;
+      }
+
+      *self.connect_to_cluster_task_submitted.write().await = true;
+      self.do_connect_to_cluster().await;
+      if self.connection_registry.is_empty().await {
+        self.submit_connect_to_cluster_task().await;
+      }
+      *self.connect_to_cluster_task_submitted.write().await = false;
+    })
+  }
+
   pub async fn connect<'a>(
     &'a self,
     target: Arc<impl ConnectingItem>,
-    get_or_connect_fn: impl Fn() -> Pin<Box<dyn Future<Output=Option<Connection>> + 'a>>,
+    get_or_connect_fn: impl Fn() -> Pin<Box<dyn Future<Output=Option<Connection>> + Send + Sync + 'a>> + Send + Sync,
   ) -> Option<Connection> {
     //todo: add error handling
     get_or_connect_fn().await

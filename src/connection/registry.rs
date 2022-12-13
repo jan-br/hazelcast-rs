@@ -18,11 +18,11 @@ pub enum ClientState {
 
 pub struct ConnectionRegistry {
   async_start: bool,
-  reconnect_mode: ReconnectMode,
+  pub reconnect_mode: RwLock<ReconnectMode>,
   smart_routing_enabled: bool,
   cluster_service: Arc<ClusterService>,
   active_connections: RwLock<HashMap<String, Connection>>,
-  client_state: RwLock<ClientState>,
+  pub client_state: RwLock<ClientState>,
 }
 
 impl ConnectionRegistry {
@@ -34,7 +34,7 @@ impl ConnectionRegistry {
   ) -> Self {
     ConnectionRegistry {
       async_start,
-      reconnect_mode,
+      reconnect_mode: RwLock::new(reconnect_mode),
       smart_routing_enabled,
       cluster_service,
       active_connections: RwLock::new(HashMap::new()),
@@ -45,9 +45,13 @@ impl ConnectionRegistry {
   pub async fn get_connection(&self, member_uuid: Option<Uuid>) -> Option<Connection> {
     if let Some(member_uuid) = member_uuid {
       self.active_connections.read().await.get(&member_uuid.to_string()).cloned()
-    }else{
+    } else {
       None
     }
+  }
+
+  pub async fn delete_connection(&self, member_uuid: Uuid) {
+    self.active_connections.write().await.remove(&member_uuid.to_string());
   }
 
   pub async fn get_random_connection(&self) -> Option<Connection> {
@@ -86,7 +90,7 @@ impl ConnectionRegistry {
       } else {
         "No connection found to cluster since the client is starting.".into()
       }
-    } else if self.reconnect_mode == ReconnectMode::Async {
+    } else if *self.reconnect_mode.read().await == ReconnectMode::Async {
       "Client is not active yet".into()
     } else {
       "No connection found to cluster.".into()

@@ -10,6 +10,7 @@ use tokio::sync::{Mutex, RwLock};
 use uuid::Uuid;
 use crate::build_info::BuildInfo;
 use crate::connection::address::Address;
+use crate::connection::manager::ConnectionManager;
 use crate::invocation::{Invocation, InvocationReturnValue};
 use crate::network::client_message_reader::ClientMessageReader;
 use crate::network::fragmented_client_message_handler::FragmentedClientMessageHandler;
@@ -27,12 +28,13 @@ pub struct Connection {
   pub read_callback: Arc<RwLock<Option<Pin<Box<dyn Fn(ClientMessage) -> Pin<Box<dyn Future<Output=()> + Send + Sync>> + Send + Sync>>>>>,
   pub fragmented_message_handler: Arc<Mutex<FragmentedClientMessageHandler>>,
   pub connected_server_version: Arc<Mutex<Option<i32>>>,
+  pub connection_manager: Arc<ConnectionManager>,
   pub connection_id: i32,
   message_reader: Arc<Mutex<ClientMessageReader>>,
 }
 
 impl Connection {
-  pub fn new(remote_address: Arc<Address>, write_half: OwnedWriteHalf, read_half: OwnedReadHalf, connection_id: i32) -> Self {
+  pub fn new(remote_address: Arc<Address>, write_half: OwnedWriteHalf, read_half: OwnedReadHalf, connection_id: i32, connection_manager: Arc<ConnectionManager>) -> Self {
     Connection {
       closed_time: Arc::new(Mutex::new(None)),
       closed_cause: Arc::new(Mutex::new(None)),
@@ -45,7 +47,8 @@ impl Connection {
       fragmented_message_handler: Arc::new(Mutex::new(FragmentedClientMessageHandler::new())),
       connected_server_version: Arc::new(Mutex::new(None)),
       closed_reason: Arc::new(Mutex::new(None)),
-      connection_id
+      connection_manager,
+      connection_id,
     }
   }
 
@@ -54,7 +57,6 @@ impl Connection {
     let mut buffer = [0; 1024];
     while let Ok(n) = read_half.read(&mut buffer).await {
       if n == 0 {
-        println!("Connection closed");
         break;
       }
       let data = buffer[..n].to_vec();
@@ -78,6 +80,7 @@ impl Connection {
       //todo: Add byte counter statistic
       // self.increment_bytes_read_fn(buffer.len());
     }
+    self.close("Connection closed".to_string(), None).await;
     //todo: Add logging?
   }
 
@@ -103,17 +106,20 @@ impl Connection {
   pub async fn set_remote_uuid(&self, uuid: Option<Uuid>) {
     *self.remote_uuid.lock().await = uuid;
   }
-  pub async fn close(&self, reason: String, cause: Option<String>) {
-    let mut closed_time = self.closed_time.lock().await;
-    if closed_time.is_some() {
-      return;
-    }
-    *closed_time = Some(chrono::offset::Utc::now().naive_utc());
+  pub fn close<'a>(&'a self, reason: String, cause: Option<String>) -> Pin<Box<dyn Future<Output=()> + Send + Sync + 'a>> {
+    Box::pin(async move {
+      let mut closed_time = self.closed_time.lock().await;
+      if closed_time.is_some() {
+        return;
+      }
+      *closed_time = Some(chrono::offset::Utc::now().naive_utc());
 
-    *self.closed_reason.lock().await = Some(reason);
-    *self.closed_cause.lock().await = cause;
+      *self.closed_reason.lock().await = Some(reason);
+      *self.closed_cause.lock().await = cause;
 
-    //todo: Log close
-    todo!()
+      //todo: Log close properly
+      println!("Connection closed");
+      self.connection_manager.on_connection_close(self).await;
+    })
   }
 }
