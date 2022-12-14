@@ -68,7 +68,6 @@ impl Connection {
         if message.start_frame.as_ref().unwrap().has_unfragmented_message_flag().await {
           let reader = self.read_callback.read().await;
           if let Some(callback) = &*reader {
-            dbg!(message.clone().get_total_length().await);
             callback(message.clone()).await;
           }
         } else {

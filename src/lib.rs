@@ -34,6 +34,8 @@ pub mod codec {
   pub mod client_add_cluster_view_listener_codec;
   pub mod client_fetch_schema_codec;
   pub mod client_create_proxy_codec;
+
+  pub mod map_remove_codec;
   pub mod map_get_codec;
   pub mod map_put_codec;
   pub mod map_add_entry_listener_codec;

@@ -14,6 +14,7 @@ use crate::codec::map_add_entry_listener_codec::MapAddEntryListenerCodec;
 
 use crate::codec::map_get_codec::MapGetCodec;
 use crate::codec::map_put_codec::MapPutCodec;
+use crate::codec::map_remove_codec::MapRemoveCodec;
 use crate::codec::map_remove_entry_listener_codec::MapRemoveEntryListenerCodec;
 use crate::listener::message_codec::ListenerMessageCodec;
 use crate::protocol::client_message::ClientMessage;
@@ -102,21 +103,6 @@ impl<K: Serializable + Send + Sync + Clone + 'static, V: Serializable + 'static 
         })
       }
     }).await;
-
-    // self.base.listener_service.register_listener(EntryListenerCodec::new(self.base.name.clone(), true, FLAGS), {
-    //   let name = self.base.name.clone();
-    //   let listener = listener.clone();
-    //   let cluster_service = self.base.cluster_service.clone();
-    //   move |mut client_message| {
-    //     let listener = listener.clone();
-    //     let cluster_service = self.base.cluster_service.clone();
-    //     // Box::pin(listener.call((client_message, )))
-    //     Box::pin(async move {
-    //       // MapAddEntryListenerCodec::handle(&mut client_message, Some(Box::pin(|_, _, _, _, _, _, _| Box::pin(async move { todo!() })))).await;
-    //       todo!()
-    //     })
-    //   }
-    // }).await;
   }
 
 
@@ -132,6 +118,25 @@ impl<K: Serializable + Send + Sync + Clone + 'static, V: Serializable + 'static 
     self.put_internal(key_data, value_data, Some(ttl)).await;
   }
 
+  pub async fn remove(&self, key: &K) {
+    let key_data = self.base.to_data(Box::new(key.clone()));
+    self.remove_internal(key_data).await;
+  }
+
+  pub async fn remove_internal(&self, key_data: HeapData) {
+    self.base.encode_invoke_on_key(
+      key_data.clone(),
+      Box::pin({
+        move |name| Box::pin({
+          let key_data = key_data.clone();
+          async move {
+            MapRemoveCodec::encode_request(&name, &key_data, &0).await
+          }
+        })
+      }),
+      Box::pin(|mut response| Box::pin(async move { Box::new(Box::new(MapRemoveCodec::decode_response(&mut response).await)) })),
+    ).await;
+  }
 
   async fn put_internal(&self, key_data: HeapData, value_data: HeapData, ttl: Option<Duration>) {
     self.base.encode_invoke_on_key(
@@ -141,11 +146,11 @@ impl<K: Serializable + Send + Sync + Clone + 'static, V: Serializable + 'static 
           let key_data = key_data.clone();
           let value_data = value_data.clone();
           async move {
-            MapPutCodec::encode_request(&name, &key_data, &value_data, &0, &ttl.map(|ttl|ttl.as_millis() as i64).unwrap_or(-1)).await
+            MapPutCodec::encode_request(&name, &key_data, &value_data, &0, &ttl.map(|ttl| ttl.as_millis() as i64).unwrap_or(-1)).await
           }
         })
       }),
-      Box::pin(|mut response| Box::pin(async move { Box::new(Box::new(MapGetCodec::decode_response(&mut response).await)) })),
+      Box::pin(|mut response| Box::pin(async move { Box::new(Box::new(MapPutCodec::decode_response(&mut response).await)) })),
     ).await;
   }
 
