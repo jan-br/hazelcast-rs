@@ -40,7 +40,7 @@ impl MapKeySetWithPredicateCodec {
     }
 
 
-    pub fn decode_response<'a>(client_message: &'a mut ClientMessage) -> Pin<Box<dyn Future<Output=Data[]> + Send + Sync + 'a>> {
+    pub fn decode_response<'a>(client_message: &'a mut ClientMessage) -> Pin<Box<dyn Future<Output=Vec<HeapData>> + Send + Sync + 'a>> {
         Box::pin(async move {
             // empty initial frame
             client_message.next_frame().await.unwrap();

@@ -24,7 +24,7 @@ impl MapLoadGivenKeysCodec {
     const REQUEST_REPLACE_EXISTING_VALUES_OFFSET: usize = ClientMessage::PARTITION_ID_OFFSET as usize + BitsUtil::INT_SIZE_IN_BYTES as usize;
     const REQUEST_INITIAL_FRAME_SIZE: usize = Self::REQUEST_REPLACE_EXISTING_VALUES_OFFSET + BitsUtil::BOOLEAN_SIZE_IN_BYTES as usize;
 
-    pub fn encode_request<'a>(name: &'a String, keys: &'a Data[], replace_existing_values: &'a bool) -> Pin<Box<dyn Future<Output=ClientMessage> + Send + Sync + 'a>> {
+    pub fn encode_request<'a>(name: &'a String, keys: &'a Vec<HeapData>, replace_existing_values: &'a bool) -> Pin<Box<dyn Future<Output=ClientMessage> + Send + Sync + 'a>> {
         Box::pin(async move {
             let mut client_message = ClientMessage::create_for_encode().await;
             client_message.retryable = false;

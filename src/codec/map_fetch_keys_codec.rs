@@ -16,7 +16,7 @@ use crate::codec_builtin::fix_sized_types_codec::FixSizedTypesCodec;
 #[derive(Default, Clone)]
 pub struct MapFetchKeysResponseParams {
     pub iteration_pointers: Vec<(i32, i32)>,
-    pub keys: Data[],
+    pub keys: Vec<HeapData>,
 }
 
 

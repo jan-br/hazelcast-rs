@@ -4,7 +4,7 @@ use crate::serialization::data::{DataInput, DataOutput};
 use crate::serialization::data::object_data_input::ObjectDataInput;
 use crate::serialization::data::object_data_output::ObjectDataOutput;
 use crate::serialization::default_serializer::IdentifiedDataSerializableSerializer;
-use crate::serialization::serializable::{IdentifiedDataSerializable, Serializable};
+use crate::serialization::serializable::{IdentifiedDataSerializable, Serializable, SomeSerializable};
 use crate::serialization::serializer::Serializer;
 use crate::serialization::service::SerializationServiceV1;
 
@@ -30,3 +30,5 @@ impl Serializer<Box<Option<String>>> for StringSerializer {
     output.write_string((*object).as_ref());
   }
 }
+
+impl SomeSerializable for String {}

@@ -106,19 +106,24 @@ impl<K: Serializable + Send + Sync + Clone + 'static, V: Serializable + 'static 
   }
 
 
-  pub async fn put(&self, key: K, value: V) {
+  pub async fn put(&self, key: impl Into<K>, value: impl Into<V>) {
+    let key = key.into();
+    let value = value.into();
     let key_data = self.base.to_data(Box::new(key));
     let value_data = self.base.to_data(Box::new(value));
     self.put_internal(key_data, value_data, None).await;
   }
 
-  pub async fn put_with_ttl(&self, key: K, value: V, ttl: Duration) {
+  pub async fn put_with_ttl(&self, key: impl Into<K>, value: impl Into<V>, ttl: Duration) {
+    let key = key.into();
+    let value = value.into();
     let key_data = self.base.to_data(Box::new(key));
     let value_data = self.base.to_data(Box::new(value));
     self.put_internal(key_data, value_data, Some(ttl)).await;
   }
 
-  pub async fn remove(&self, key: &K) {
+  pub async fn remove(&self, key: impl Into<K>) {
+    let key: K = key.into();
     let key_data = self.base.to_data(Box::new(key.clone()));
     self.remove_internal(key_data).await;
   }
@@ -154,7 +159,8 @@ impl<K: Serializable + Send + Sync + Clone + 'static, V: Serializable + 'static 
     ).await;
   }
 
-  pub async fn get(&self, key: &K) -> Option<V> {
+  pub async fn get(&self, key: impl Into<K>) -> Option<V> {
+    let key = key.into();
     let key_data = self.base.to_data(Box::new(key.clone()));
     self.get_internal(key_data).await.map(|data| *data)
   }

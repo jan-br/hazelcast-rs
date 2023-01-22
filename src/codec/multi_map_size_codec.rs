@@ -1,26 +1,25 @@
 use crate::codec_builtin::string_codec::StringCodec;
-use crate::serialization::heap_data::HeapData;
-use crate::codec_builtin::list_multi_frame_codec::ListMultiFrameCodec;
-use crate::codec_builtin::data_codec::DataCodec;
 
 use std::mem::MaybeUninit;
 use crate::protocol::client_message::{ClientMessage, Frame};
 use crate::util::bits_util::BitsUtil;
 use core::pin::Pin;
 use std::future::Future;
+use crate::codec_builtin::fix_sized_types_codec::FixSizedTypesCodec;
 
 
 
-pub struct MapValuesCodec;
+pub struct MultiMapSizeCodec;
 
-impl MapValuesCodec {
+impl MultiMapSizeCodec {
 
-    // hex: 0x012400
-    const REQUEST_MESSAGE_TYPE: i32 = 74752;
-    // hex: 0x012401
-    // RESPONSE_MESSAGE_TYPE = 74753
+    // hex: 0x020A00
+    const REQUEST_MESSAGE_TYPE: i32 = 133632;
+    // hex: 0x020A01
+    // RESPONSE_MESSAGE_TYPE = 133633
 
     const REQUEST_INITIAL_FRAME_SIZE: usize = ClientMessage::PARTITION_ID_OFFSET as usize + BitsUtil::INT_SIZE_IN_BYTES as usize;
+    const RESPONSE_RESPONSE_OFFSET: usize = ClientMessage::RESPONSE_BACKUP_ACKS_OFFSET as usize + BitsUtil::BYTE_SIZE_IN_BYTES as usize;
 
     pub fn encode_request<'a>(name: &'a String) -> Pin<Box<dyn Future<Output=ClientMessage> + Send + Sync + 'a>> {
         Box::pin(async move {
@@ -39,12 +38,11 @@ impl MapValuesCodec {
     }
 
 
-    pub fn decode_response<'a>(client_message: &'a mut ClientMessage) -> Pin<Box<dyn Future<Output=Vec<HeapData>> + Send + Sync + 'a>> {
+    pub fn decode_response<'a>(client_message: &'a mut ClientMessage) -> Pin<Box<dyn Future<Output=i32> + Send + Sync + 'a>> {
         Box::pin(async move {
-            // empty initial frame
-            client_message.next_frame().await.unwrap();
+            let initial_frame = client_message.next_frame().await.unwrap();
 
-            ListMultiFrameCodec::decode(client_message, DataCodec::decode).await
+            let x = FixSizedTypesCodec::decode_int(&*initial_frame.content.lock().await, Self::RESPONSE_RESPONSE_OFFSET).await; x
         })
     }
 

@@ -65,7 +65,7 @@ impl MapAddNearCacheInvalidationListenerCodec {
     }
 
 
-    pub async fn handle(client_message: &mut ClientMessage, handle_i_map_invalidation_event: Option<Pin<Box<dyn Fn(Option<HeapData>, Uuid, Uuid, i64) -> Pin<Box<dyn Future<Output=()> + Send + Sync>> + Send + Sync>>>, handle_i_map_batch_invalidation_event: Option<Pin<Box<dyn Fn(Data[], UUID[], UUID[], Long[]) -> Pin<Box<dyn Future<Output=()> + Send + Sync>> + Send + Sync>>>) {
+    pub async fn handle(client_message: &mut ClientMessage, handle_i_map_invalidation_event: Option<Pin<Box<dyn Fn(Option<HeapData>, Uuid, Uuid, i64) -> Pin<Box<dyn Future<Output=()> + Send + Sync>> + Send + Sync>>>, handle_i_map_batch_invalidation_event: Option<Pin<Box<dyn Fn(Vec<HeapData>, UUID[], UUID[], Long[]) -> Pin<Box<dyn Future<Output=()> + Send + Sync>> + Send + Sync>>>) {
         let message_type = client_message.get_message_type().await;
         if message_type == Self::EVENT_I_MAP_INVALIDATION_MESSAGE_TYPE && handle_i_map_invalidation_event.is_some() {
             let initial_frame = client_message.next_frame().await.unwrap();

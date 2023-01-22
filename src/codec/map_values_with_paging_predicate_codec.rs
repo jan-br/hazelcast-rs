@@ -17,7 +17,7 @@ use std::future::Future;
 /** @internal */
 #[derive(Default, Clone)]
 pub struct MapValuesWithPagingPredicateResponseParams {
-    pub response: Data[],
+    pub response: Vec<HeapData>,
     pub anchor_data_list: AnchorDataListHolder,
 }
 

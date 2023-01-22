@@ -17,7 +17,7 @@ use crate::codec_builtin::fix_sized_types_codec::FixSizedTypesCodec;
 #[derive(Default, Clone)]
 pub struct MapEventJournalReadResponseParams {
     pub read_count: i32,
-    pub items: Data[],
+    pub items: Vec<HeapData>,
     pub item_seqs: Option<Long[]>,
     pub next_seq: i64,
 }

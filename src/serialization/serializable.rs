@@ -17,9 +17,7 @@ pub trait Serializable {
   fn get_serializer(&self, service: &SerializationServiceV1) -> Arc<dyn Serializer<Box<Self>>>;
 }
 
-pub trait CustomSerializable {
-
-}
+pub trait CustomSerializable {}
 
 pub trait IdentifiedDataSerializable: Any + IdentifiedDataSerializableSerialization + IdentifiedDataSerializableInfo + Send + Sync {}
 
@@ -47,6 +45,40 @@ impl<T: IdentifiedDataSerializableSerialization> IdentifiedDataSerializableSeria
 
   fn write_data(&mut self, output: &mut ObjectDataOutput) {
     (*self).write_data(output)
+  }
+}
+
+pub trait SomeSerializable: Clone + Sized where Option<Self>: Serializable {}
+
+impl<T> Serializable for T where T: 'static + SomeSerializable, Option<Self>: Serializable {
+  fn get_serializer(&self, service: &SerializationServiceV1) -> Arc<dyn Serializer<Box<Self>>> {
+    Arc::new(OptionWrappedSerializer::new(Option::<Self>::get_serializer(&Some(self.clone()), service)))
+  }
+}
+
+struct OptionWrappedSerializer<T> {
+  serializer: Arc<dyn Serializer<Box<Option<T>>>>,
+}
+
+impl<T> OptionWrappedSerializer<T> {
+  pub fn new(serializer: Arc<dyn Serializer<Box<Option<T>>>>) -> Self {
+    Self {
+      serializer
+    }
+  }
+}
+
+impl<T> Serializer<Box<T>> for OptionWrappedSerializer<T> where T: 'static {
+  fn id(&self) -> i32 {
+    self.serializer.id()
+  }
+
+  fn read(&self, input: &mut ObjectDataInput) -> Box<T> {
+    Box::new(self.serializer.read(input).unwrap())
+  }
+
+  fn write(&self, output: &mut ObjectDataOutput, object: Box<T>) {
+    self.serializer.write(output, Box::new(Some(*object)))
   }
 }
 

@@ -41,6 +41,11 @@ pub mod codec {
   pub mod map_add_entry_listener_codec;
   pub mod map_remove_entry_listener_codec;
 
+  pub mod multi_map_get_codec;
+  pub mod multi_map_put_codec;
+  pub mod multi_map_add_entry_listener_codec;
+  pub mod multi_map_remove_entry_codec;
+
   pub mod custom {
     pub mod address_codec;
     pub mod distributed_object_info_codec;

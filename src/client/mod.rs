@@ -91,4 +91,8 @@ impl HazelcastClient {
   pub async fn get_map<K: Clone + Send + Sync + Serializable + 'static, V: Clone + Send + Sync + Serializable + 'static>(&self, name: impl ToString) -> MapProxy<K, V> {
     self.proxy_manager.get_or_create_proxy(name.to_string(), true).await
   }
+
+  pub async fn get_multimap<K: Clone + Send + Sync + Serializable + 'static, V: Clone + Send + Sync + Serializable + 'static>(&self, name: impl ToString) -> MapProxy<K, V> {
+    self.proxy_manager.get_or_create_proxy(name.to_string(), true).await
+  }
 }
