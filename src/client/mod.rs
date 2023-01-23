@@ -10,6 +10,7 @@ use crate::listener::service::ListenerService;
 use crate::partition_service::PartitionService;
 use crate::proxy::manager::ProxyManager;
 use crate::proxy::map_proxy::MapProxy;
+use crate::proxy::multimap_proxy::MultiMapProxy;
 use crate::serialization::schema_service::SchemaService;
 use crate::serialization::serializable::Serializable;
 use crate::serialization::service::SerializationServiceV1;
@@ -92,7 +93,7 @@ impl HazelcastClient {
     self.proxy_manager.get_or_create_proxy(name.to_string(), true).await
   }
 
-  pub async fn get_multimap<K: Clone + Send + Sync + Serializable + 'static, V: Clone + Send + Sync + Serializable + 'static>(&self, name: impl ToString) -> MapProxy<K, V> {
+  pub async fn get_multimap<K: Clone + Send + Sync + Serializable + 'static, V: Clone + Send + Sync + Serializable + 'static>(&self, name: impl ToString) -> MultiMapProxy<K, V> {
     self.proxy_manager.get_or_create_proxy(name.to_string(), true).await
   }
 }

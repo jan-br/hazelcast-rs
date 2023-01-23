@@ -14,9 +14,13 @@ async fn main() {
   let mut client = HazelcastClient::new(client_config).await;
   client.start().await;
 
-  let map = client.get_map::<String, String>("something").await;
-  map.put("test", "blub").await;
-  let option = map.get("test").await;
-  println!("{:?}", option);
-  map.remove("test").await;
+  let multimap = client.get_multimap::<String, String>("something2").await;
+  multimap.remove("test", "test").await;
+  let result = multimap.get("test").await;
+  println!("{:?}", result);
+  // let map = client.get_map::<String, String>("something").await;
+  // map.put("test", "blub").await;
+  // let option = map.get("test").await;
+  // println!("{:?}", option);
+  // map.remove("test").await;
 }
