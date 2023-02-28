@@ -17,6 +17,10 @@ pub mod base;
 pub mod entry_event;
 pub mod event_type;
 pub mod multimap_proxy;
+pub mod weak_map_proxy;
+pub mod strong_map_proxy;
+pub mod registry_proxy;
+pub mod weak_registry_proxy;
 
 pub trait Proxy: ProxyBaseLogic + 'static {
   const SERVICE_NAME: &'static str;

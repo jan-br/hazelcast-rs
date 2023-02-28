@@ -28,6 +28,7 @@ pub mod proxy;
 pub mod build_info;
 pub mod lifecycle_service;
 pub mod listener;
+pub mod nested_state;
 
 pub mod codec {
   pub mod client_authentication_codec;

@@ -1,6 +1,7 @@
 use std::any::Any;
 use std::collections::HashMap;
 use std::future::Future;
+use std::hash::Hash;
 use std::marker::PhantomData;
 use std::mem::transmute;
 use std::pin::Pin;
@@ -17,10 +18,13 @@ use crate::codec::map_put_codec::MapPutCodec;
 use crate::codec::map_remove_codec::MapRemoveCodec;
 use crate::codec::map_remove_entry_listener_codec::MapRemoveEntryListenerCodec;
 use crate::listener::message_codec::ListenerMessageCodec;
+use crate::nested_state::NestedStateInsert;
 use crate::protocol::client_message::ClientMessage;
 use crate::proxy::base::{HasProxyBase, ProxyBase};
 use crate::proxy::entry_event::EntryEvent;
 use crate::proxy::Proxy;
+use crate::proxy::strong_map_proxy::StrongMapProxy;
+use crate::proxy::weak_map_proxy::WeakMapProxy;
 use crate::serialization::heap_data::HeapData;
 use crate::serialization::serializable::Serializable;
 use crate::util::maybe_future::MaybeFuture;
@@ -164,6 +168,15 @@ impl<K: Serializable + Send + Sync + Clone + 'static, V: Serializable + 'static 
     let key_data = self.base.to_data(Box::new(key.clone()));
     self.get_internal(key_data).await.map(|data| *data)
   }
+
+  pub fn to_weak_map(self) -> WeakMapProxy<K, V> where K: Eq + PartialEq + Hash {
+    self.into()
+  }
+
+  pub fn to_strong_map(self) -> StrongMapProxy<K, V> where K: Eq + PartialEq + Hash {
+    self.into()
+  }
+
   async fn get_internal(&self, key_data: HeapData) -> Option<Box<V>> {
     self.base.encode_invoke_on_key(key_data.clone(), {
       Box::pin(move |value| {
@@ -210,5 +223,14 @@ impl<K: Clone + Send + Sync + Serializable + 'static, V: Clone + Send + Sync + S
 impl<K: Send + Sync + Serializable + 'static, V: Send + Sync + Serializable + 'static> HasProxyBase for MapProxy<K, V> {
   fn get_proxy_base(&self) -> &ProxyBase {
     &self.base
+  }
+}
+
+
+impl<K: Send + Sync + Clone + Serializable + 'static, V: Send + Sync + Clone + Serializable + 'static> NestedStateInsert<K, V> for MapProxy<K, V> {
+  fn insert<'a>(&'a mut self, key: impl Into<K> + Send + Sync + 'a, value: impl Into<V> + Send + Sync + 'a) -> Pin<Box<dyn Future<Output=()> + Send + Sync + 'a>> {
+    Box::pin(async move {
+      self.put(key, value).await
+    })
   }
 }
