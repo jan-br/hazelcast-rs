@@ -15,8 +15,8 @@ use crate::serialization::serializable::Serializable;
 use crate::serialization::service::SerializationServiceV1;
 use async_actor::inject::assisted_inject::AssistedInstantiable;
 use async_actor::inject::injectable_instance::ManuallyInjectableInstance;
-use async_actor::inject::InjectorHandle;
-use async_actor::system::HasHandleWrapper;
+use async_actor::inject::{Injector, InjectorHandle};
+use async_actor::system::{Component, HasHandleWrapper};
 use async_actor_proc::{actor, assisted_factory, Component, Injectable};
 use async_trait::async_trait;
 use std::sync::Arc;
@@ -33,6 +33,17 @@ pub struct HazelcastClient {
     schema_service: Arc<SchemaService>,
     proxy_manager: Arc<ProxyManager>,
     lifecycle_service: Arc<LifecycleService>,
+}
+
+impl HazelcastClient {
+    pub async fn new(client: Arc<ClientConfig>) -> HazelcastClient {
+        let injector_handle = Injector::default().start();
+        HazelcastClient::instantiate(
+            injector_handle,
+            HazelcastClientInstantiationData::new(client),
+        )
+        .await
+    }
 }
 
 #[actor]
